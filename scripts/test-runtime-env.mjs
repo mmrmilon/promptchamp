@@ -69,7 +69,7 @@ test('explicit plan scope rejection retries with standard encrypted variables, n
     await syncRuntime(fixture(),request,line=>logs.push(line));
     assert.equal(writes.length,11);
     for(const variable of writes.slice(1)) {
-      assert.deepEqual(variable.scopes,['builds','functions','runtime','post-processing']);
+      assert.deepEqual(variable.scopes,['builds','functions','runtime','post_processing']);
       assert.equal(variable.is_secret,false);
       assert.deepEqual(variable.values.map(v=>v.context),['production']);
     }

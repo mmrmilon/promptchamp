@@ -73,7 +73,8 @@ export async function syncRuntime(env, request = fetch, log = console.log) {
       continue;
     }
     const write = async () => {
-      const variable = {key, scopes: standardScopes ? ['builds','functions','runtime','post-processing'] : ['functions'],
+      // Netlify's API uses post_processing; post-processing is the CLI/UI alias.
+      const variable = {key, scopes: standardScopes ? ['builds','functions','runtime','post_processing'] : ['functions'],
         is_secret: !standardScopes, values: [{context: 'production', value}]};
       if (existing.has(key)) await api(`${base}/${key}${query}`, 'PUT', variable);
       else await api(base + query, 'POST', [variable]);

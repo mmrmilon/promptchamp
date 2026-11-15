@@ -1,0 +1,117 @@
+name: PromptChamp CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promptchamp-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  checks:
+    name: Build and integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: promptchamp_ci
+          POSTGRES_USER: promptchamp
+          POSTGRES_PASSWORD: disposable-ci-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U promptchamp -d promptchamp_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://promptchamp:disposable-ci-password@127.0.0.1:5432/promptchamp_ci
+      SESSION_SECRET: ci-only-session-secret-not-a-production-credential-00000000
+      ADMIN_ACCESS_KEY: ci-only-host-key-not-a-production-credential-00000000000000
+      CLOUDFLARE_ACCOUNT_ID: ci-placeholder-account
+      CLOUDFLARE_API_TOKEN: ci-placeholder-token
+      GEMINI_JUDGE_API_KEY: ci-placeholder-key
+      PROCESS_AI: 'false'
+      APP_MODE: demo
+      NETLIFY_TELEMETRY_DISABLED: '1'
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Build application and check all functions
+        run: npm run check
+      - name: Run isolated database integration tests
+        run: npm run test:ci
+
+  deploy:
+    name: Deploy production
+    needs: checks
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    concurrency:
+      group: promptchamp-production
+      cancel-in-progress: false
+    steps:
+      - name: Check deployment configuration
+        id: config
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: |
+          if [ -n "$NETLIFY_AUTH_TOKEN" ] && [ -n "$NETLIFY_SITE_ID" ] && [ -n "$DATABASE_URL" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Deployment skipped. Add NETLIFY_AUTH_TOKEN, NETLIFY_SITE_ID, and PRODUCTION_DATABASE_URL to GitHub Secrets."
+            echo "### Deployment awaits one-time setup" >> "$GITHUB_STEP_SUMMARY"
+            echo "Add the three deployment secrets documented in docs/ci-cd.md. CI checks still run normally." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Check out verified source
+        if: steps.config.outputs.configured == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        if: steps.config.outputs.configured == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install locked dependencies
+        if: steps.config.outputs.configured == 'true'
+        run: npm ci
+      - name: Build verified source
+        if: steps.config.outputs.configured == 'true'
+        run: npm run check
+      - name: Apply pending production migrations
+        if: steps.config.outputs.configured == 'true'
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+        run: npm run migrate
+      - name: Deploy application and functions
+        if: steps.config.outputs.configured == 'true'
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+          NETLIFY_TELEMETRY_DISABLED: '1'
+        run: npx --no-install netlify deploy --prod --no-build --dir=dist --functions=netlify/functions --message "GitHub Actions $GITHUB_SHA"

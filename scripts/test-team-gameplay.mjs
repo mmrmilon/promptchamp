@@ -1,9 +1,11 @@
+import {existsSync} from 'node:fs';
+import {databaseTls} from '../server/database-tls.mjs';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import postgres from 'postgres';
-process.loadEnvFile('.env');
+if(existsSync('.env'))process.loadEnvFile('.env');
 const base='http://localhost:5174';
-const sql=postgres(process.env.DATABASE_URL,{prepare:false,max:1,ssl:'require',connect_timeout:10});
+const sql=postgres(process.env.DATABASE_URL,{prepare:false,max:1,ssl:databaseTls(),connect_timeout:10});
 let eventId,checks=0;
 const workerId=crypto.randomUUID();
 const host={cookie:''},a={cookie:''},b={cookie:''},c={cookie:''};

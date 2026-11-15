@@ -1,6 +1,5 @@
 import pg from 'pg';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { databaseTls } from './database-tls.mjs';
 
 // Dedicated clients keep transaction commands off the shared query pipeline.
 // All interpolated values remain PostgreSQL parameters, including UUIDs and dates.
@@ -18,8 +17,7 @@ export function eventDb(): Sql {
   if (sql) return sql;
   const url = new URL(process.env.DATABASE_URL!);
   for (const key of ['sslmode','sslcert','sslkey','sslrootcert']) url.searchParams.delete(key);
-  const ca = url.hostname.endsWith('.supabase.com') || url.hostname.endsWith('.supabase.co') ? readFileSync(resolve('db/root-ca.pem'),'utf8') : undefined;
-  const pool = new pg.Pool({ connectionString:url.href, ssl:{rejectUnauthorized:true,...(ca ? {ca}: {})},
+  const pool = new pg.Pool({ connectionString:url.href, ssl:databaseTls(url.href),
     max:3, idleTimeoutMillis:20_000, connectionTimeoutMillis:10_000, statement_timeout:15_000 });
   pool.on('error',error => console.error('Event database connection error:',error.name));
   sql = tagged((text,values) => pool.query(text,values));

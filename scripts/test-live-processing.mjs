@@ -1,10 +1,12 @@
+import {existsSync} from 'node:fs';
+import {databaseTls} from '../server/database-tls.mjs';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import postgres from 'postgres';
-process.loadEnvFile('.env');
+if(existsSync('.env'))process.loadEnvFile('.env');
 const {processNext}=await import('../.netlify/local/processing-test.mjs');
 const live=process.argv.includes('--live-ai');
-const sql=postgres(process.env.DATABASE_URL,{prepare:false,max:1,ssl:'require',connect_timeout:10});
+const sql=postgres(process.env.DATABASE_URL,{prepare:false,max:1,ssl:databaseTls(),connect_timeout:10});
 const base='http://localhost:5174',workerId=crypto.randomUUID();
 const host={cookie:''},a={cookie:''},b={cookie:''};let eventId,calls=0;
 async function call(client,path,method='GET',body,status=200){

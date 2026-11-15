@@ -1,7 +1,9 @@
+import {existsSync} from 'node:fs';
+import {databaseTls} from '../server/database-tls.mjs';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import postgres from 'postgres';
-process.loadEnvFile('.env');
+if(existsSync('.env'))process.loadEnvFile('.env');
 const base = 'http://localhost:5174';
 let cookie = '';
 let eventId;
@@ -14,7 +16,7 @@ async function request(path, method = 'GET', body, expected = 200, origin = base
   checks++;
   return response;
 }
-const sql = postgres(process.env.DATABASE_URL, { prepare:false,max:1,ssl:'require',connect_timeout:10 });
+const sql = postgres(process.env.DATABASE_URL, { prepare:false,max:1,ssl:databaseTls(),connect_timeout:10 });
 try {
   assert.equal((await fetch(base + '/admin.html')).status, 200);
   assert.equal((await fetch(base + '/api/config')).status, 200);

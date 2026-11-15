@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { eventDb } from './event-store';
 import { queueGeneration, wakeWorker, workerReady } from './processing';
+import {weightedScore} from './challenges';
 
 const json = (value: unknown, status = 200, headers = {}) => Response.json(value, { status, headers: { 'Cache-Control':'no-store', ...headers } });
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -29,6 +30,8 @@ async function queue(sql: any, id: string) {
 function failure(error: any) {
   if (error instanceof RuleError) return json({error:error.message},error.status);
   if (error.message==='GENERATION_CAP') return json({error:'The event image limit has been reached. Ask the host for help.'},409);
+  if(error.message==='WORKSPACE_CAP')return json({error:'The workspace has reached its monthly AI allowance.'},409);
+  if(error.message==='WORKSPACE_ACCESS')return json({error:'Live access is not available for this workspace.'},403);
   if (error.code === '23505') return json({error:'That team name or lucky number was just taken. Refresh and try again.'},409);
   console.error('Team event service failed:',error.code ?? error.name);
   return json({error:'The event service is temporarily unavailable.'},503);
@@ -86,22 +89,22 @@ export default async function teamApi(request: Request) {
   if (!process.env.DATABASE_URL) return json({error:'Event database is not configured.'},503);
   try {
     const sql = eventDb();
-    if(url.pathname==='/api/events'&&request.method==='GET')return json({events:await sql`select title,slug,status,scheduled_at from promptchamp.events where status in ('registration','live','completed') order by scheduled_at desc limit 50`});
+    if(url.pathname==='/api/events'&&request.method==='GET')return json({events:await sql`select e.title,e.slug,e.status,e.scheduled_at,e.mode from promptchamp.events e join promptchamp.workspaces w on w.id=e.workspace_id where e.status in ('registration','live','completed') and e.discoverable and w.status='active' order by e.scheduled_at desc limit 50`});
     const leaderboardPath=url.pathname.match(/^\/api\/events\/([a-z0-9-]{3,100})\/leaderboard$/);
     if(leaderboardPath && request.method==='GET') {
-      const [event]=await sql`select id,title,results_visibility from promptchamp.events where slug=${leaderboardPath[1]} and status in ('registration','live','completed')`;
+      const [event]=await sql`select e.id,e.title,e.results_visibility,e.mode from promptchamp.events e join promptchamp.workspaces w on w.id=e.workspace_id where e.slug=${leaderboardPath[1]} and e.status in ('registration','live','completed') and w.status='active'`;
       if(!event) return json({error:'Event not found.'},404);
-      if(event.results_visibility!=='released') return json({title:event.title,released:false,rows:[]});
+      if(event.results_visibility!=='released') return json({title:event.title,mode:event.mode,released:false,rows:[]});
       const rows=await sql`select rank() over(order by s.score desc)::int as rank,t.name,s.score
         from promptchamp.submissions s join promptchamp.round_entries n on n.id=s.entry_id join promptchamp.teams t on t.id=n.team_id
         where s.event_id=${event.id} and s.status='scored' and n.is_current and t.status='active' order by rank,t.name`;
-      return json({title:event.title,released:true,rows});
+      return json({title:event.title,mode:event.mode,released:true,rows});
     }
     const publicPath = url.pathname.match(/^\/api\/events\/([a-z0-9-]{3,100})$/);
     if (publicPath && request.method === 'GET') {
-      const [event] = await sql`select e.id,e.slug,e.title,e.status,e.scheduled_at,e.team_capacity,r.duration_seconds
-        from promptchamp.events e join promptchamp.rounds r on r.event_id=e.id and r.sequence=1
-        where e.slug=${publicPath[1]} and e.status in ('registration','live','completed')`;
+      const [event] = await sql`select e.id,e.slug,e.title,e.status,e.scheduled_at,e.team_capacity,e.mode,r.duration_seconds
+        from promptchamp.events e join promptchamp.rounds r on r.event_id=e.id and r.sequence=1 join promptchamp.workspaces w on w.id=e.workspace_id
+        where e.slug=${publicPath[1]} and e.status in ('registration','live','completed') and w.status='active'`;
       return event ? json({event}) : json({error:'This event is not open yet. Check the link with your host.'},404);
     }
     const match = url.pathname.match(/^\/api\/team\/([^/]+)\/(register|recover|state|number|start|draft|submit|reference|image)$/);
@@ -123,6 +126,8 @@ export default async function teamApi(request: Request) {
       const team = await sql.begin(async tx => {
         const [event] = await tx`select * from promptchamp.events where id=${id} for update`;
         if (!event || !['registration','live','completed'].includes(event.status)) throw new RuleError('This event is not accepting teams.');
+        const [workspace]=await tx`select status from promptchamp.workspaces where id=${event.workspace_id}`;
+        if(workspace.status!=='active')throw new RuleError('This workspace is not accepting participants.',403);
         let team;
         if (action === 'register') {
           if (event.status !== 'registration') throw new RuleError('Registration has closed.');
@@ -149,7 +154,7 @@ export default async function teamApi(request: Request) {
         (s.generated_data is not null) as has_image
         from promptchamp.round_entries n left join promptchamp.submissions s on s.entry_id=n.id where n.team_id=${team.id} and n.is_current`;
       const [clock] = await sql`select clock_timestamp() as now`;
-      const [event] = await sql`select status,team_capacity,results_visibility from promptchamp.events where id=${id}`;
+      const [event] = await sql`select status,team_capacity,results_visibility,mode from promptchamp.events where id=${id}`;
       return json({team,entry,event,queue:await queue(sql,id),serverNow:new Date(clock.now).getTime()});
     }
     if (action === 'reference') {
@@ -166,6 +171,8 @@ export default async function teamApi(request: Request) {
     // All turn mutations share the event lock with host queue changes and registration.
     const result = await sql.begin(async tx => {
       const [event] = await tx`select * from promptchamp.events where id=${id} for update`;
+      const [workspace]=await tx`select status,live_enabled from promptchamp.workspaces where id=${event.workspace_id}`;
+      if(workspace.status!=='active')throw new RuleError('This workspace is suspended.',403);
       const [entry] = await tx`select * from promptchamp.round_entries where team_id=${team.id} and is_current for update`;
       if (!entry) throw new RuleError('Turn not found.',404);
       if (action === 'number') {
@@ -183,7 +190,8 @@ export default async function teamApi(request: Request) {
       if (action === 'start') {
         if (entry.started_at) return {startedAt:entry.started_at,deadlineAt:entry.deadline_at};
         if (entry.state !== 'called') throw new RuleError('Wait for the host to call your team.');
-        if(!ready)throw new RuleError('AI processing is not ready. Ask the host before starting.',503);
+        if(event.mode==='live'&&!workspace.live_enabled)throw new RuleError('Workspace live access is not enabled.',403);
+        if(event.mode==='live'&&!ready)throw new RuleError('AI processing is not ready. Ask the host before starting.',503);
         const [round] = await tx`select duration_seconds from promptchamp.rounds where id=${entry.round_id}`;
         const [turn] = await tx`update promptchamp.round_entries set state='active',started_at=clock_timestamp(),
           deadline_at=clock_timestamp()+${round.duration_seconds}*interval '1 second' where id=${entry.id} returning started_at,deadline_at`;
@@ -200,10 +208,17 @@ export default async function teamApi(request: Request) {
         return {version:saved.draft_version};
       }
       if (action === 'submit') {
-        if(!ready)throw new RuleError('AI processing is temporarily offline. Ask the host for help.',503);
+        if(event.mode==='live'&&!ready)throw new RuleError('AI processing is temporarily offline. Ask the host for help.',503);
         const [accepted] = await tx`insert into promptchamp.submissions(entry_id,event_id,request_id,prompt)
           select ${entry.id},${id},${body.requestId},${prompt} where ${entry.deadline_at}::timestamptz>clock_timestamp() returning id,prompt,status`;
         if (!accepted) throw new RuleError('Time is up. Submission was not accepted.');
+        if(event.mode==='demo'){
+          const bytes=createHash('sha256').update(prompt).digest();const ratings=Array.from({length:5},(_,i)=>1+bytes[i]%5);const score=weightedScore(ratings);
+          const [image]=await tx`select data,mime_type from promptchamp.reference_images where event_id=${id}`;
+          await tx`update promptchamp.submissions set status='scored',score=${score},ratings=${JSON.stringify(ratings)}::jsonb,tip='Demo score only. This is a sample recreation, not an AI-generated match.',generated_data=${image.data},generated_mime=${image.mime_type},image_expires_at=now()+interval '30 days' where id=${accepted.id}`;
+          await tx`update promptchamp.round_entries set state='completed',draft_prompt=${prompt} where id=${entry.id}`;
+          return {submission:{...accepted,status:'scored'}};
+        }
         await queueGeneration(tx,accepted.id,id,event.generation_cap);
         await tx`update promptchamp.round_entries set state='submitted',draft_prompt=${prompt} where id=${entry.id}`;
         return {submission:accepted};

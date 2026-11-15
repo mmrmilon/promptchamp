@@ -37,6 +37,11 @@ export async function runQueueBatch() {
 
 export async function queueGeneration(tx: any, submissionId: string, eventId: string, cap: number) {
   // Callers must hold the event row lock. Reservation, job, and submission commit together.
+  const [workspace]=await tx`select w.* from promptchamp.workspaces w join promptchamp.events e on e.workspace_id=w.id where e.id=${eventId} for update of w`;
+  if(!workspace||workspace.status!=='active'||!workspace.live_enabled)throw new Error('WORKSPACE_ACCESS');
+  const [monthly]=await tx`select count(*)::int as total from promptchamp.generation_reservations g join promptchamp.events e on e.id=g.event_id
+    where e.workspace_id=${workspace.id} and g.created_at>=date_trunc('month',now() at time zone 'UTC') at time zone 'UTC'`;
+  if(monthly.total>=workspace.monthly_generation_limit)throw new Error('WORKSPACE_CAP');
   const [used] = await tx`select count(*)::int as total from promptchamp.generation_reservations where event_id=${eventId}`;
   if (used.total >= cap) throw new Error('GENERATION_CAP');
   const [job] = await tx`insert into promptchamp.processing_jobs(submission_id,kind) values(${submissionId},'generate') returning id`;
@@ -59,9 +64,10 @@ export async function processNext(providers = {generate,judge:judgeReference}, s
   });
   if (!job) return false;
   try {
-    const [submission] = await sql`select s.*,r.mime_type as reference_mime,r.data as reference_data from promptchamp.submissions s
-      join promptchamp.reference_images r on r.event_id=s.event_id where s.id=${job.submission_id}`;
+    const [submission] = await sql`select s.*,r.mime_type as reference_mime,r.data as reference_data,e.mode,w.status as workspace_status,w.live_enabled from promptchamp.submissions s
+      join promptchamp.reference_images r on r.event_id=s.event_id join promptchamp.events e on e.id=s.event_id join promptchamp.workspaces w on w.id=e.workspace_id where s.id=${job.submission_id}`;
     if (!submission) throw new Error('Submission reference unavailable');
+    if(submission.mode!=='live'||submission.workspace_status!=='active'||!submission.live_enabled)throw new Error('Workspace live access unavailable');
     const result = job.kind==='generate' ? await providers.generate(submission.prompt) :
       await providers.judge({mimeType:submission.reference_mime,data:submission.reference_data},{mimeType:submission.generated_mime,data:submission.generated_data});
     await sql.begin(async tx => {

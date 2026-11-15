@@ -12,6 +12,7 @@ Copy the following values from the local `.env` file into your hosting project's
 - `CLOUDFLARE_ACCOUNT_ID`
 - `CLOUDFLARE_API_TOKEN`
 - `GEMINI_JUDGE_API_KEY`
+- `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and `PLATFORM_OWNER_EMAIL` for registered accounts; see [accounts](accounts.md) for SMTP, redirects, and the shared-key transition.
 - `APP_MODE=demo` keeps the optional `/demo.html` experience isolated. The real event pages use database event settings and live AI independently of this legacy switch.
 
 Global `EVENT_START` and `EVENT_END` are not required for the team event flow. Create and schedule events through `/admin.html`.

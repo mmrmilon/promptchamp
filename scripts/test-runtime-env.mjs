@@ -20,10 +20,12 @@ test('allowlisted settings use production Functions scope; existing settings upd
   const env={...fixture(), UNRELATED_SECRET:'never-copy-this'};
   await syncRuntime(env, async(url,options)=>{
     calls.push({url,...options,body:options.body?JSON.parse(options.body):undefined});
-    const payload=url.includes('/sites/')?{account_id:'test-account'}:options.method==='GET'?[{key:'DATABASE_URL'},{key:'ADMIN_ACCESS_KEY'},{key:'UNRELATED_SETTING'}]:{};
+    const payload=url.includes('/sites/')?{account_id:'internal-account-id',account_slug:'test-team'}:options.method==='GET'?[{key:'DATABASE_URL'},{key:'ADMIN_ACCESS_KEY'},{key:'UNRELATED_SETTING'}]:{};
     return new Response(options.method==='DELETE'?null:JSON.stringify(payload),{status:options.method==='DELETE'?204:200});
   }, line=>logs.push(line));
   const writes=calls.filter(call=>['PUT','POST'].includes(call.method));
+  assert.ok(calls.slice(1).every(call=>call.url.includes('/accounts/test-team/env')));
+  assert.ok(!JSON.stringify(calls).includes('internal-account-id'));
   assert.equal(writes.length,10);
   for (const call of writes) {
     const item=Array.isArray(call.body)?call.body[0]:call.body;

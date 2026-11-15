@@ -44,8 +44,10 @@ export async function syncRuntime(env, request = fetch, log = console.log) {
     return response.status === 204 ? null : response.json();
   }
   const site = await api(`/sites/${encodeURIComponent(env.NETLIFY_SITE_ID)}`);
-  if (!site.account_id) throw new Error('The deployment site has no account ID.');
-  const base = `/accounts/${encodeURIComponent(site.account_id)}/env`;
+  // The environment API expects the team slug, as used by the official CLI's
+  // env commands. The site's internal account_id is not interchangeable.
+  if (!site.account_slug) throw new Error('The deployment site has no account slug.');
+  const base = `/accounts/${encodeURIComponent(site.account_slug)}/env`;
   const query = `?site_id=${encodeURIComponent(env.NETLIFY_SITE_ID)}`;
   const existing = new Set((await api(base + query)).map(item => item.key));
   for (const [key, value] of Object.entries(settings)) {

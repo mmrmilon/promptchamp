@@ -4,7 +4,7 @@ Repository: `https://github.com/mmrmilon/promptchamp`.
 
 ## Server-side variables
 
-Copy the following values from the local `.env` file into your hosting project's environment variables with Functions scope. Never put the file itself in GitHub, frontend variables, or build logs.
+Maintain production values in GitHub's `production` environment as described in [ci-cd.md](ci-cd.md). CI/CD synchronizes them to production Functions before deployment. The GitHub secret `PRODUCTION_DATABASE_URL` supplies runtime `DATABASE_URL`. Never put `.env` itself in GitHub, frontend variables, or build logs.
 
 - `DATABASE_URL`
 - `SESSION_SECRET` (at least 32 random characters)
@@ -29,7 +29,7 @@ Functions scope must include all AI/database/session variables for the API, back
 
 ## Live checks
 
-1. Open `/admin.html` and sign in with the private host key.
+1. Open `/admin.html`, register/verify the configured owner email, then sign in. The private host key is transitional only.
 2. Create a small rehearsal event, upload a reference under 2 MiB, and open registration.
 3. Open the team link in another browser/profile; join, save the recovery code, and choose a number.
 4. Lock the draw, call the team, start, and submit a prompt. Verify generation, scoring, and image persistence after reload.
@@ -40,7 +40,7 @@ Generation reservations enforce the event's image cap, including failures and un
 
 Reference and generated images are currently stored privately in Postgres. Successful generated images expire after 30 days; scores and prompts remain. This suits the initial office pilot but object storage is the next scaling step. Uploaded reference images are not automatically deleted.
 
-This release uses one shared host key rather than personal host accounts. Keep it private. Event registration links are open to anyone who has the link; this version does not implement corporate SSO or an event join code.
+Administration uses verified personal accounts and workspace roles; see [accounts.md](accounts.md). Event registration links are open to anyone who has the link; this version does not implement corporate SSO or an event join code.
 
 ## Local operation
 

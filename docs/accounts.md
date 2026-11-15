@@ -4,7 +4,7 @@ PromptChamp now uses verified Supabase email/password accounts for workspace adm
 
 ## Configure authentication
 
-Set these values in the local `.env` and in Netlify environment variables with Functions scope:
+Set these values in local `.env` for development and GitHub's `production` Environment secrets for deployment. CI/CD synchronizes them to Netlify with production Functions scope; see [ci-cd.md](ci-cd.md). `PUBLIC_APP_URL` belongs in GitHub Environment variables instead of secrets.
 
 | Variable | Purpose |
 | --- | --- |
@@ -14,7 +14,7 @@ Set these values in the local `.env` and in Netlify environment variables with F
 | `SESSION_SECRET` | Existing server secret, retained to encrypt provider tokens and sign processing requests |
 | `PUBLIC_APP_URL` | Optional canonical application URL. Netlify's built-in `URL` is used when absent |
 
-The publishable key and project URL are not private API credentials, but this implementation keeps provider calls on the server. Do not supply the Supabase secret/service-role key. Database and AI credentials remain unchanged. GitHub's production database secret is still required for automatic migrations; these account settings belong in the deployed application's runtime environment, not just GitHub Secrets.
+The publishable key and project URL are not private API credentials, but this implementation keeps provider calls on the server. Do not supply the Supabase secret/service-role key. GitHub's `PRODUCTION_DATABASE_URL` supplies migrations and runtime `DATABASE_URL`; the workflow copies all required runtime settings, so no manual Netlify duplication is needed.
 
 In Supabase Authentication, enable email/password login and email confirmation. Set the Site URL to the published PromptChamp site and allow its `/admin.html` redirect URL (and `http://localhost:5173/admin.html` for local use). Configure custom SMTP for verification and password-reset delivery before opening public registration. Supabase's built-in sender is restricted and is not a production mail service. Gmail may be used as the user's login address; it is separate from the SMTP sender.
 
@@ -24,7 +24,7 @@ Reference: [Supabase custom SMTP](https://supabase.com/docs/guides/auth/auth-smt
 
 ## Claim the existing office workspace
 
-1. Configure the runtime values above in Netlify and deploy this release through GitHub Actions.
+1. Configure the values above in GitHub's production environment and deploy through GitHub Actions.
 2. Keep `ADMIN_ACCESS_KEY` during the transition. Existing key login is restricted to the reserved office workspace.
 3. Register using the exact `PLATFORM_OWNER_EMAIL`, confirm the email, and sign in.
 4. The verified account is granted the initial platform role and ownership of **IT Connect Office**. Existing events, reference images, teams, and scores remain in that workspace.

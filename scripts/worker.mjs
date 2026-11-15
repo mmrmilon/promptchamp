@@ -1,0 +1,11 @@
+import {existsSync} from 'node:fs';
+import {build} from 'esbuild';
+import {resolve} from 'node:path';
+import {pathToFileURL} from 'node:url';
+if(existsSync('.env'))process.loadEnvFile('.env');
+const output=resolve('.netlify/local/processing.mjs');
+await build({entryPoints:['server/processing.ts'],outfile:output,bundle:true,platform:'node',format:'esm',packages:'external'});
+const {startWorker}=await import(pathToFileURL(output));
+const stop=startWorker();
+process.on('SIGINT',()=>{stop();process.exit(0);});
+process.on('SIGTERM',()=>{stop();process.exit(0);});

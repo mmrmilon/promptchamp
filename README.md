@@ -1,4 +1,4 @@
-# PromptChamp
+﻿# PromptChamp
 
 PromptChamp runs team image-prompt challenges for the monthly office IT Connect event.
 
@@ -37,4 +37,3 @@ Scoring failures can reuse the stored image. Uncertain generation calls require 
 [Host setup](docs/host-setup.md) documents registration and queue controls. [Event design](docs/office-event-design.md) records the larger architecture and future enhancements. Private object storage, individual host accounts, and corporate sign-in are future improvements.
 
 For sequential play against the same image, keep active screens away from waiting teams and avoid projecting the reference or prompts before everyone has finished.
-

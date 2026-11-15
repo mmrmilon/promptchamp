@@ -1,11 +1,18 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {runtimeSettings, syncRuntime} from './sync-runtime-env.mjs';
+import {runtimeSettings, syncRuntime, failureReason} from './sync-runtime-env.mjs';
 
 const fixture = () => ({NETLIFY_AUTH_TOKEN:'private-deploy-token', NETLIFY_SITE_ID:'test-site',
   PRODUCTION_DATABASE_URL:'postgresql://user:private-password@db.example.test/app', SESSION_SECRET:'private-session-secret-00000000000000000000',
   CLOUDFLARE_ACCOUNT_ID:'account', CLOUDFLARE_API_TOKEN:'private-ai-token', GEMINI_JUDGE_API_KEY:'private-judge-token',
   SUPABASE_URL:'https://example.supabase.co', SUPABASE_PUBLISHABLE_KEY:'publishable-test', PLATFORM_OWNER_EMAIL:'owner@example.test'});
+
+test('provider diagnostics classify restrictions without echoing values',()=>{
+  assert.match(failureReason('Only all scopes are supported by your plan private-token'),/Functions-only scope/);
+  assert.match(failureReason('Secrets are not supported by your plan private-token'),/secret-marked/);
+  assert.match(failureReason('Permission denied private-token'),/not authorized/);
+  assert.ok(!failureReason('Unknown error private-token').includes('private-token'));
+});
 
 test('missing or invalid configuration makes no provider calls', async () => {
   for (const change of [{SUPABASE_URL:''},{SESSION_SECRET:'short'},{SUPABASE_URL:'http://example.test'},{APP_MODE:'invalid'}]) {

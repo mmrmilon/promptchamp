@@ -1,5 +1,15 @@
 import {pathToFileURL} from 'node:url';
 
+export function failureReason(body) {
+  // Classify provider text into fixed messages; never echo potentially sensitive text.
+  if (/scope|granular/i.test(body) && /plan|upgrade|support|allow/i.test(body)) return 'The hosting plan does not support the requested Functions-only scope.';
+  if (/secret/i.test(body) && /plan|upgrade|support|allow|enable/i.test(body)) return 'The hosting plan or policy does not allow secret-marked environment variables.';
+  if (/sso|single.sign.on|saml/i.test(body)) return 'The deployment token needs authorization for the hosting team SSO policy.';
+  if (/limit|quota|maximum/i.test(body)) return 'The hosting account has reached an environment-variable limit.';
+  if (/permission|forbidden|not.authoriz|access.denied|not.allowed/i.test(body)) return 'The deployment token or team role is not authorized to write these environment variables.';
+  return 'The provider rejected the request. Check token permissions and environment-variable plan support.';
+}
+
 // Only this allowlist can cross from GitHub Actions into the production runtime.
 export function runtimeSettings(env) {
   const required = ['PRODUCTION_DATABASE_URL','SESSION_SECRET','CLOUDFLARE_ACCOUNT_ID','CLOUDFLARE_API_TOKEN','GEMINI_JUDGE_API_KEY','SUPABASE_URL','SUPABASE_PUBLISHABLE_KEY','PLATFORM_OWNER_EMAIL'];
@@ -40,7 +50,7 @@ export async function syncRuntime(env, request = fetch, log = console.log) {
       });
     } catch { throw new Error(`Runtime settings API request failed (${method}). Retry the workflow.`); }
     // Provider error bodies may echo credentials. Never log or propagate them.
-    if (!response.ok) throw new Error(`Runtime settings API returned HTTP ${response.status} (${method}). Check token permissions and Functions scope support.`);
+    if (!response.ok) throw new Error(`Runtime settings API returned HTTP ${response.status} (${method}). ${failureReason(await response.text())}`);
     return response.status === 204 ? null : response.json();
   }
   const site = await api(`/sites/${encodeURIComponent(env.NETLIFY_SITE_ID)}`);

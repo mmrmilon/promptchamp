@@ -55,3 +55,25 @@ test('provider errors do not leak response bodies or continue to write', async (
   });
   assert.equal(calls,1);
 });
+
+test('explicit plan scope rejection retries with standard encrypted variables, not arbitrary authorization failures', async () => {
+  for(const planRestriction of [true,false]) {
+    const writes=[],logs=[];
+    const request=async(url,options)=>{
+      if(options.method==='GET')return Response.json(url.includes('/sites/')?{account_slug:'test-team'}:[]);
+      const variable=JSON.parse(options.body)[0];writes.push(variable);
+      if(variable.scopes.length===1)return Response.json({message:planRestriction?'Upgrade your Netlify account to set specific scopes':'Permission denied private-token'},{status:403});
+      return Response.json({});
+    };
+    if(!planRestriction){await assert.rejects(syncRuntime(fixture(),request,()=>{}),/not authorized/);assert.equal(writes.length,1);continue;}
+    await syncRuntime(fixture(),request,line=>logs.push(line));
+    assert.equal(writes.length,11);
+    for(const variable of writes.slice(1)) {
+      assert.deepEqual(variable.scopes,['builds','functions','runtime','post-processing']);
+      assert.equal(variable.is_secret,false);
+      assert.deepEqual(variable.values.map(v=>v.context),['production']);
+    }
+    assert.ok(logs.some(line=>line.includes('Authorized hosting users can read')));
+    assert.ok(!logs.join('').includes('private-'));
+  }
+});

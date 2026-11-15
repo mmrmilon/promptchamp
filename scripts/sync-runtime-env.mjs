@@ -50,7 +50,12 @@ export async function syncRuntime(env, request = fetch, log = console.log) {
       });
     } catch { throw new Error(`Runtime settings API request failed (${method}). Retry the workflow.`); }
     // Provider error bodies may echo credentials. Never log or propagate them.
-    if (!response.ok) throw new Error(`Runtime settings API returned HTTP ${response.status} (${method}). ${failureReason(await response.text())}`);
+    if (!response.ok) {
+      const reason = failureReason(await response.text());
+      throw Object.assign(new Error(`Runtime settings API returned HTTP ${response.status} (${method}). ${reason}`), {
+        scopePlanRestriction: response.status === 403 && reason.includes('Functions-only scope'),
+      });
+    }
     return response.status === 204 ? null : response.json();
   }
   const site = await api(`/sites/${encodeURIComponent(env.NETLIFY_SITE_ID)}`);
@@ -60,15 +65,25 @@ export async function syncRuntime(env, request = fetch, log = console.log) {
   const base = `/accounts/${encodeURIComponent(site.account_slug)}/env`;
   const query = `?site_id=${encodeURIComponent(env.NETLIFY_SITE_ID)}`;
   const existing = new Set((await api(base + query)).map(item => item.key));
+  let standardScopes = false;
   for (const [key, value] of Object.entries(settings)) {
     if (value === null) {
       if (existing.has(key)) await api(`${base}/${key}${query}`, 'DELETE');
       log(`Runtime setting ${key}: cleared or absent.`);
       continue;
     }
-    const variable = {key, scopes: ['functions'], is_secret: true, values: [{context: 'production', value}]};
-    if (existing.has(key)) await api(`${base}/${key}${query}`, 'PUT', variable);
-    else await api(base + query, 'POST', [variable]);
+    const write = async () => {
+      const variable = {key, scopes: standardScopes ? ['builds','functions','runtime','post-processing'] : ['functions'],
+        is_secret: !standardScopes, values: [{context: 'production', value}]};
+      if (existing.has(key)) await api(`${base}/${key}${query}`, 'PUT', variable);
+      else await api(base + query, 'POST', [variable]);
+    };
+    try { await write(); } catch (error) {
+      if (standardScopes || !error.scopePlanRestriction) throw error;
+      standardScopes = true;
+      log('Hosting plan requires standard encrypted environment variables with all scopes. Authorized hosting users can read these runtime copies. Values remain excluded from logs.');
+      await write();
+    }
     log(`Runtime setting ${key}: synchronized.`);
   }
   log('Production runtime settings synchronized. Values were not logged. Deployment must follow.');

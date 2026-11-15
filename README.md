@@ -2,6 +2,8 @@
 
 PromptChamp runs team image-prompt challenges for the monthly office IT Connect event.
 
+Administrators register and verify email accounts, then manage separate customer workspaces. Workspace owners invite hosts; platform administrators approve live access and monthly AI allowances. Events support demo or live mode. See [account and workspace setup](docs/accounts.md), including how to claim the existing office events and retire the shared key.
+
 Teams register, choose a lucky number, wait for the host to call them, then start a 2- or 3-minute challenge. Everyone sees the same reference image. An accepted prompt queues image generation and visual-match judging; the host publishes the final leaderboard after all turns and results are resolved.
 
 ## Run locally on Windows

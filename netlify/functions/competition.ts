@@ -5,6 +5,7 @@ import { judge, type Picture } from '../../server/image-judging';
 import { generate } from '../../server/image-generation';
 import eventApi from '../../server/event-api';
 import teamApi from '../../server/team-api';
+import accountApi from '../../server/account-api';
 
 export const config = { path: '/api/*' };
 export { startWorker } from '../../server/processing';
@@ -44,6 +45,7 @@ const conflict: Record<string,string> = {
 
 export default async function handler(request: Request) {
   const url = new URL(request.url);
+  if(url.pathname.startsWith('/api/account/'))return accountApi(request);
   if (url.pathname.startsWith('/api/admin/')) return eventApi(request);
   if (url.pathname==='/api/events' || url.pathname.startsWith('/api/events/') || url.pathname.startsWith('/api/team/')) return teamApi(request);
   const route = url.pathname.replace(/\/$/, '');

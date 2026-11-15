@@ -28,6 +28,7 @@ export async function hostResults(eventId:string,action:string|undefined,method:
         await tx`update promptchamp.rounds set status='closed' where event_id=${eventId}`;
       } else {
         if(event.results_visibility==='released')throw new Error('Published results are locked.');
+        if(action?.startsWith('retry-')){const [workspace]=await tx`select status,live_enabled from promptchamp.workspaces where id=${event.workspace_id}`;if(event.mode!=='live'||workspace.status!=='active'||!workspace.live_enabled)throw new Error('Live processing is not enabled for this workspace.');}
         if(!/^[a-f0-9-]{36}$/i.test(body.submissionId??''))throw new Error('Select a submission.');
         const [submission]=await tx`select * from promptchamp.submissions where id=${body.submissionId} and event_id=${eventId} for update`;
         if(!submission)throw new Error('Submission not found.');
@@ -55,6 +56,6 @@ export async function hostResults(eventId:string,action:string|undefined,method:
     return json({});
   }catch(error:any){
     if(error.code){console.error('Results API failed:',error.code);return json({error:'Could not update results.'},503);}
-    return json({error:error.message==='GENERATION_CAP'?'The event image limit has been reached.':error.message},409);
+    return json({error:error.message==='GENERATION_CAP'?'The event image limit has been reached.':error.message==='WORKSPACE_CAP'?'The workspace monthly AI allowance has been reached.':error.message==='WORKSPACE_ACCESS'?'Workspace live access is not available.':error.message},409);
   }
 }

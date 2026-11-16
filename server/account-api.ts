@@ -8,7 +8,7 @@ const uuid=/^[a-f0-9-]{36}$/i;
 async function listWorkspaces(account:any){return account.platformAdmin?
  eventDb()`select w.*,'owner' as role from promptchamp.workspaces w order by w.created_at`:
  eventDb()`select w.*,m.role from promptchamp.workspaces w join promptchamp.workspace_members m on m.workspace_id=w.id where m.user_id=${account.user.id} order by w.created_at`;}
-function appUrl(request:Request){return new URL('/admin.html',process.env.PUBLIC_APP_URL||process.env.URL||new URL(request.url).origin);}
+function appUrl(request:Request){return new URL('/admin',process.env.PUBLIC_APP_URL||process.env.URL||new URL(request.url).origin);}
 export default async function accountApi(request:Request){
  const url=new URL(request.url),path=url.pathname.replace(/\/$/,'');
  if(request.method!=='GET'&&request.headers.get('origin')!==url.origin)return json({error:'Origin not allowed.'},403);

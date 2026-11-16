@@ -1,0 +1,12 @@
+# Keep bookmarked and previously emailed links working. Query strings carry over.
+/index.html / 301!
+/admin.html /admin 301!
+/event.html /event 301!
+/leaderboard.html /leaderboard 301!
+/demo.html /demo 301!
+
+# Serve the existing multi-page build at clean URLs.
+/admin /admin.html 200
+/event /event.html 200
+/leaderboard /leaderboard.html 200
+/demo /demo.html 200

@@ -19,10 +19,10 @@ npm.cmd run dev
 Create `.env` from `.env.example` and configure the server-side credentials. Run `npm.cmd run migrate` for a new database. The development server starts a database-backed AI worker automatically when credentials are configured. Never commit `.env`.
 
 - `/` - open office events
-- `/admin.html` - private host sign-in and event controls
-- `/event.html?event=your-event-slug` - team registration and timed challenge
-- `/leaderboard.html?event=your-event-slug` - final result presentation
-- `/demo.html` - original offline demo
+- `/admin` - private host sign-in and event controls
+- `/event?event=your-event-slug` - team registration and timed challenge
+- `/leaderboard?event=your-event-slug` - final result presentation
+- `/demo` - original offline demo
 
 ## Host an event
 

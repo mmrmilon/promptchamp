@@ -13,9 +13,9 @@ Maintain production values in GitHub's `production` environment as described in 
 - `CLOUDFLARE_API_TOKEN`
 - `GEMINI_JUDGE_API_KEY`
 - `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and `PLATFORM_OWNER_EMAIL` for registered accounts; see [accounts](accounts.md) for SMTP, redirects, and the shared-key transition.
-- `APP_MODE=demo` keeps the optional `/demo.html` experience isolated. The real event pages use database event settings and live AI independently of this legacy switch.
+- `APP_MODE=demo` keeps the optional `/demo` experience isolated. The real event pages use database event settings and live AI independently of this legacy switch.
 
-Global `EVENT_START` and `EVENT_END` are not required for the team event flow. Create and schedule events through `/admin.html`.
+Global `EVENT_START` and `EVENT_END` are not required for the team event flow. Create and schedule events through `/admin`.
 
 ## Database and build
 
@@ -29,7 +29,7 @@ Functions scope must include all AI/database/session variables for the API, back
 
 ## Live checks
 
-1. Open `/admin.html`, register/verify the configured owner email, then sign in. The private host key is transitional only.
+1. Open `/admin`, register/verify the configured owner email, then sign in. The private host key is transitional only.
 2. Create a small rehearsal event, upload a reference under 2 MiB, and open registration.
 3. Open the team link in another browser/profile; join, save the recovery code, and choose a number.
 4. Lock the draw, call the team, start, and submit a prompt. Verify generation, scoring, and image persistence after reload.

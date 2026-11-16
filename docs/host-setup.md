@@ -1,6 +1,6 @@
 # PromptChamp host setup
 
-The host workspace is at `/admin.html`. The office event landing page is at `/`; the original competition demo is at `/demo.html`.
+The host workspace is at `/admin`. The office event landing page is at `/`; the original competition demo is at `/demo`.
 
 ## Sign in
 

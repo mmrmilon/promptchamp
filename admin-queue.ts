@@ -7,7 +7,7 @@ export function attachQueue(parent: HTMLElement, event: {id:string;slug:string;s
   let active=true,busy=false,rows:any[]=[];
   stop=()=>{active=false;clearInterval(timer);};
   const endpoint=`/api/admin/events/${event.id}/queue`;
-  const link=new URL('/event.html?event='+encodeURIComponent(event.slug),location.origin).href;
+  const link=new URL('/event?event='+encodeURIComponent(event.slug),location.origin).href;
   let notice='';
   async function load(){
     if(!active||!panel.isConnected||busy)return;

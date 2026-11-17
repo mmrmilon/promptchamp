@@ -37,8 +37,8 @@ function signIn() {
   };
 }
 async function load() {
-  const context=await api('session');activeWorkspace=context.workspace;legacyContext=!!context.legacy;
-  ({ events } = await api('events'));
+  const result=await api('events');
+  events=result.events;activeWorkspace=result.workspace;legacyContext=!!result.legacy;
   logout.hidden = false;
   render();
 }

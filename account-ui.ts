@@ -40,6 +40,7 @@ export function initAccounts(views:{mountEvents:(target:HTMLElement)=>Promise<vo
   root.querySelectorAll<HTMLButtonElement>('[data-tab]').forEach(b=>b.onclick=()=>void run(async()=>{tab=b.dataset.tab!;await shell();}));
   root.querySelector('#another-workspace')!.addEventListener('click',()=>{root.querySelector('#account-view')!.innerHTML=`<section class="form"><h2>Another workspace</h2><form id="workspace-create">${field('name','Workspace name')}<button class="button">Create demo workspace</button></form></section>`;form('workspace-create',async data=>{await api('workspaces','POST',{name:data.get('name')});tab='overview';await refresh();});});
   bindWorkspace();const target=root.querySelector<HTMLElement>('#account-view')!;
+  target.innerHTML='<p class="notice" role="status">Loading workspace data...</p>';
   if(active.status==='suspended'&&!session.platformAdmin){target.innerHTML='<p class="notice">This workspace is suspended. Contact your platform administrator.</p>';return;}
   if(tab==='events'){await views.mountEvents(target);return;}
   if(tab==='overview'||tab==='usage'){
@@ -67,5 +68,6 @@ export function initAccounts(views:{mountEvents:(target:HTMLElement)=>Promise<vo
  }
  function bindWorkspace(){root.querySelector<HTMLSelectElement>('#choose-workspace')?.addEventListener('change',event=>void run(async()=>{await api('select-workspace','POST',{workspaceId:(event.target as HTMLSelectElement).value});sessionStorage.removeItem('promptchamp-host-event');await refresh();}));}
  logout.onclick=()=>void run(async()=>{await api('logout','POST',{});session=null;config=await api('config');auth();});
- void(async()=>{try{config=await api('config');if(recovery&&accessToken&&refreshToken){await api('recovery-session','POST',{accessToken,refreshToken});await refresh();return;}try{await refresh();}catch(error:any){if(error.status===401)auth();else throw error;}}catch(error:any){auth();feedback.textContent=error.message;}})();
+ // Logged-in visits do not need the public sign-in configuration request.
+ void(async()=>{try{if(recovery&&accessToken&&refreshToken){await api('recovery-session','POST',{accessToken,refreshToken});await refresh();return;}try{await refresh();}catch(error:any){if(error.status===401){config=await api('config');auth();}else throw error;}}catch(error:any){try{config=await api('config');}catch{}auth();feedback.textContent=error.message;}})();
 }

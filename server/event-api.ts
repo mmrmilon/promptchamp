@@ -82,7 +82,7 @@ export default async function eventApi(request: Request) {
     const control = path.match(/^\/api\/admin\/events\/([a-f0-9-]{36})\/queue(?:\/(lock|next|skip|recall))?$/i);
     if (control) return hostQueue(control[1], control[2], request.method, body);
     if (path === '/api/admin/events' && request.method === 'GET') {
-      return json({ events: await sql`select e.*, r.duration_seconds,
+      return json({ workspace,legacy:!!context.legacy,events: await sql`select e.*, r.duration_seconds,
         exists(select 1 from promptchamp.reference_images i where i.event_id=e.id) as has_reference
         from promptchamp.events e join promptchamp.rounds r on r.event_id=e.id and r.sequence=1 where e.workspace_id=${workspace.id}
         order by e.created_at desc` });

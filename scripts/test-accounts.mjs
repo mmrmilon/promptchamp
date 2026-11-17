@@ -8,6 +8,7 @@ if(process.env.CI!=='true'||!['localhost','127.0.0.1'].includes(dbUrl.hostname)|
 const base='http://localhost:5174',password='Test-only-password-12345!',office='00000000-0000-4000-8000-000000000001';
 const sql=postgres(process.env.DATABASE_URL,{prepare:false,max:1,ssl:false});
 const users=new Map(),access=new Map(),refresh=new Map(),latest=new Map();
+let userCalls=0,refreshCalls=0,userDelay=0,activeUserCalls=0,peakUserCalls=0;
 function userView(user){return{id:user.id,email:user.email,email_confirmed_at:user.verified?new Date().toISOString():null,confirmed_at:user.phoneVerified?new Date().toISOString():null,user_metadata:user.metadata};}
 function tokens(user){const value={access_token:randomBytes(24).toString('hex'),refresh_token:randomBytes(24).toString('hex')};access.set(value.access_token,user);refresh.set(value.refresh_token,user);latest.set(user.email,value);return value;}
 const provider=createServer(async(req,res)=>{
@@ -23,10 +24,14 @@ const provider=createServer(async(req,res)=>{
   if(url.pathname==='/auth/v1/token'){
    const user=url.searchParams.get('grant_type')==='refresh_token'?refresh.get(body.refresh_token):users.get(body.email);
    if(!user||(url.searchParams.get('grant_type')==='password'&&user.password!==body.password))return reply({},401);
+   if(url.searchParams.get('grant_type')==='refresh_token'){refreshCalls++;refresh.delete(body.refresh_token);}
    return reply(tokens(user));
   }
   if(url.pathname==='/auth/v1/user'){
+   userCalls++;
    const user=access.get(token);if(!user)return reply({},401);
+   activeUserCalls++;peakUserCalls=Math.max(peakUserCalls,activeUserCalls);
+   try{if(userDelay)await new Promise(resolve=>setTimeout(resolve,userDelay));}finally{activeUserCalls--;}
    if(req.method==='PUT'&&body.password)user.password=body.password;
    return reply(userView(user));
   }
@@ -61,6 +66,17 @@ try{
  const [encrypted]=await sql`select provider_tokens from promptchamp.account_sessions where user_id=${registered.id}`;
  assert.ok(!encrypted.provider_tokens.includes(latest.get(registered.email).access_token));assert.ok(!a.cookie.includes(latest.get(registered.email).access_token));
  const {workspace:wa}=await(await account(a,'workspaces','POST',{name:'Customer A'},201)).json();workspaces.push(wa.id);assert.equal(wa.live_enabled,false);assert.equal(wa.default_mode,'demo');
+ // Each HTTP request verifies with the provider once, without writing profiles
+ // or serializing unrelated reads behind a session-row transaction lock.
+ const [{version:profileBefore}]=await sql`select xmin::text as version from promptchamp.profiles where id=${registered.id}`;
+ let before=userCalls;
+ await account(a,'dashboard');assert.equal(userCalls-before,1);
+ before=userCalls;peakUserCalls=0;userDelay=150;
+ const parallelStart=performance.now();
+ try{await Promise.all([account(a,'dashboard'),account(a,'library')]);}finally{userDelay=0;}
+ assert.equal(userCalls-before,2);assert.ok(peakUserCalls>=2,'Same-session reads must verify concurrently, outside database row locks');
+ const [{version:profileAfter}]=await sql`select xmin::text as version from promptchamp.profiles where id=${registered.id}`;assert.equal(profileAfter,profileBefore);
+ console.log(`PASS: one provider verification per request; parallel same-session reads ${Math.round(performance.now()-parallelStart)}ms with 150ms mock provider latency; no profile rewrite.`);
  await register(b,'customer-b@example.test');const {workspace:wb}=await(await account(b,'workspaces','POST',{name:'Customer B'},201)).json();workspaces.push(wb.id);
  await account(a,'select-workspace','POST',{workspaceId:wb.id},403);
  await account(a,'platform','GET',undefined,403);
@@ -96,7 +112,9 @@ try{
  const submitted=await Promise.all([[t1,live1],[t2,live2]].map(async([client,event])=>{const response=await fetch(base+`/api/team/${event.id}/submit`,{method:'POST',headers:{Origin:base,Cookie:client.cookie,'Content-Type':'application/json'},body:JSON.stringify({prompt:'A red boat on a jungle lake',requestId:randomUUID()})});return response.status;}));assert.deepEqual(submitted.sort(),[200,409]);
  const [monthly]=await sql`select count(*)::int as total from promptchamp.generation_reservations g join promptchamp.events e on e.id=g.event_id where e.workspace_id=${wa.id}`;assert.equal(monthly.total,1);
  await account(owner,'platform/'+wb.id,'PATCH',{status:'suspended',liveEnabled:false,monthlyLimit:0});await account(b,'dashboard','GET',undefined,403);await admin(b,'events','GET',undefined,403);await admin(a,'events');
- const oldToken=latest.get(registered.email).access_token;access.delete(oldToken);await account(a,'session');assert.notEqual(latest.get(registered.email).access_token,oldToken);
+ const oldToken=latest.get(registered.email).access_token;access.delete(oldToken);const refreshBefore=refreshCalls;
+ await Promise.all([account(a,'session'),account(a,'dashboard'),account(a,'library')]);
+ assert.notEqual(latest.get(registered.email).access_token,oldToken);assert.equal(refreshCalls-refreshBefore,1,'Concurrent requests must share the locked token refresh');
  const recoveryTokens=tokens(users.get('customer-b@example.test'));await account(b,'recovery-session','POST',{accessToken:recoveryTokens.access_token,refreshToken:recoveryTokens.refresh_token});await admin(b,'events','GET',undefined,403);
  await account(b,'password','POST',{password:'Updated-test-password-54321!'});assert.equal(users.get('customer-b@example.test').password,'Updated-test-password-54321!');
  const staleCookie=b.cookie;await account(b,'logout','POST',{});await account({cookie:staleCookie},'session','GET',undefined,401);

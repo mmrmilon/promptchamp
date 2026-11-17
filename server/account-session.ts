@@ -38,23 +38,56 @@ export async function createAccountSession(request:Request,tokens:any,purpose='n
   await tx`insert into promptchamp.account_sessions(user_id,token_hash,provider_tokens,workspace_id,purpose) values(${user.id},${digest(token)},${encryptTokens({access_token:tokens.access_token,refresh_token:tokens.refresh_token})},${member?.workspace_id??null},${purpose})`;});
  return accountCookie(request,token);
 }
-export async function accountFor(request:Request){
+// Share authentication only inside one HTTP request. A later request must still
+// revalidate identity and read current roles; this is not a login/role cache.
+const requestAccounts=new WeakMap<Request,ReturnType<typeof resolveAccount>>();
+export function accountFor(request:Request){
+ let result=requestAccounts.get(request);
+ if(!result){result=resolveAccount(request);requestAccounts.set(request,result);}
+ return result;
+}
+async function resolveAccount(request:Request){
  const token=rawSession(request);if(!token)return null;
- return eventDb().begin(async tx=>{
-  const [session]=await tx`select * from promptchamp.account_sessions where token_hash=${digest(token)} and expires_at>clock_timestamp() for update`;
+ const sql=eventDb();
+ const [session]=await sql`select s.*,p.email as profile_email,
+   exists(select 1 from promptchamp.platform_admins where user_id=s.user_id) as platform_admin,
+   exists(select 1 from promptchamp.workspace_members where workspace_id=${OFFICE_WORKSPACE} and role='owner') as office_owned
+   from promptchamp.account_sessions s join promptchamp.profiles p on p.id=s.user_id
+   where s.token_hash=${digest(token)} and s.expires_at>clock_timestamp()`;
   if(!session)return null;
-  let tokens;try{tokens=decryptTokens(session.provider_tokens);}catch{await tx`delete from promptchamp.account_sessions where id=${session.id}`;return null;}
+  let tokens;try{tokens=decryptTokens(session.provider_tokens);}catch{await sql`delete from promptchamp.account_sessions where id=${session.id}`;return null;}
   let user;
   try{user=await authRequest('user','GET',undefined,tokens.access_token);}catch(error){
    if(!(error instanceof AccountError)||error.status!==401)throw error;
-   try{tokens=await authRequest('token?grant_type=refresh_token','POST',{refresh_token:tokens.refresh_token});user=await authRequest('user','GET',undefined,tokens.access_token);await tx`update promptchamp.account_sessions set provider_tokens=${encryptTokens(tokens)} where id=${session.id}`;}
-   catch(refreshError){if(refreshError instanceof AccountError&&refreshError.status===401){await tx`delete from promptchamp.account_sessions where id=${session.id}`;return null;}throw refreshError;}
+   // Only expired-token refresh needs a row lock. Re-read after taking it so
+   // concurrent requests can reuse a token another request already refreshed.
+   user=await sql.begin(async tx=>{
+    const [current]=await tx`select provider_tokens from promptchamp.account_sessions where id=${session.id} and expires_at>clock_timestamp() for update`;
+    if(!current)return null;
+    try{
+     const latest=decryptTokens(current.provider_tokens);
+     if(current.provider_tokens!==session.provider_tokens){
+      try{return checkedUser(await authRequest('user','GET',undefined,latest.access_token));}
+      catch(changedError){if(!(changedError instanceof AccountError)||changedError.status!==401)throw changedError;}
+     }
+     const refreshed=await authRequest('token?grant_type=refresh_token','POST',{refresh_token:latest.refresh_token});
+     const verified=checkedUser(await authRequest('user','GET',undefined,refreshed.access_token));
+     if(verified.id!==session.user_id)throw new AccountError('Session identity mismatch.',401);
+     await tx`update promptchamp.account_sessions set provider_tokens=${encryptTokens(refreshed)} where id=${session.id}`;
+     return verified;
+    }catch(refreshError){if(refreshError instanceof AccountError&&refreshError.status===401){await tx`delete from promptchamp.account_sessions where id=${session.id}`;return null;}throw refreshError;}
+   });
+   if(!user)return null;
   }
   checkedUser(user);if(user.id!==session.user_id)throw new AccountError('Session identity mismatch.',401);
-  await syncProfile(tx,user);
-  const [platform]=await tx`select user_id from promptchamp.platform_admins where user_id=${user.id}`;
-  return {user:{id:user.id,email:user.email,displayName:user.user_metadata?.display_name??''},sessionId:session.id,workspaceId:session.workspace_id,purpose:session.purpose,platformAdmin:!!platform};
- });
+  let platformAdmin=session.platform_admin;
+  const bootstrap=user.email.toLowerCase()===process.env.PLATFORM_OWNER_EMAIL?.trim().toLowerCase();
+  if(session.profile_email!==user.email.toLowerCase()||(bootstrap&&(!session.platform_admin||!session.office_owned))){
+   await sql.begin(tx=>syncProfile(tx,user));
+   const [platform]=await sql`select user_id from promptchamp.platform_admins where user_id=${user.id}`;
+   platformAdmin=!!platform;
+  }
+  return {user:{id:user.id,email:user.email,displayName:user.user_metadata?.display_name??''},sessionId:session.id,workspaceId:session.workspace_id,purpose:session.purpose,platformAdmin};
 }
 export async function signOutAccount(request:Request){const token=rawSession(request);if(token){const [session]=await eventDb()`delete from promptchamp.account_sessions where token_hash=${digest(token)} returning provider_tokens`;if(session){try{await authRequest('logout?scope=local','POST',{},decryptTokens(session.provider_tokens).access_token);}catch{}}}return accountCookie(request,'',true);}
 export async function legacyAllowed(){const [row]=await eventDb()`select legacy_login_enabled from promptchamp.platform_settings where id=true`;return !!row?.legacy_login_enabled&&process.env.ALLOW_LEGACY_HOST_LOGIN!=='false';}

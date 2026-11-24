@@ -34,6 +34,6 @@ try{
   await delay(500);
  }
  if(!ready)throw new Error('CI server did not become ready.');
- for(const file of ['test-event-setup.mjs','test-team-gameplay.mjs','test-live-processing.mjs','test-accounts.mjs'])await run('scripts/'+file);
+ for(const file of ['test-event-setup.mjs','test-team-gameplay.mjs','test-live-processing.mjs','test-random-references.mjs','test-accounts.mjs'])await run('scripts/'+file);
  console.log('PASS: isolated database, migration replay, host setup, timed gameplay, and mocked AI processing.');
 }finally{server.kill('SIGTERM');}

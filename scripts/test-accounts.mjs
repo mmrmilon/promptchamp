@@ -83,7 +83,7 @@ try{
  await admin(a,'events','POST',{title:'Forbidden live event',slug:'account-live-denied',mode:'live',scheduledAt:'2026-12-01T09:00:00+08:00',durationSeconds:120,generationCap:20,teamCapacity:1},403);
  const ea=await createEvent(a,'account-demo-a'),eb=await createEvent(b,'account-demo-b');assert.equal(ea.workspace_id,wa.id);assert.equal(eb.workspace_id,wb.id);
  const aEvents=await(await admin(a,'events')).json();assert.ok(aEvents.events.some(e=>e.id===ea.id));assert.ok(!aEvents.events.some(e=>e.id===eb.id));
- for(const suffix of ['','/reference','/results','/queue','/export'])await admin(b,'events/'+ea.id+suffix,'GET',undefined,404);
+ for(const suffix of ['','/reference','/references','/presentation','/presentation/reference','/presentation/image','/results','/queue','/export'])await admin(b,'events/'+ea.id+suffix,'GET',undefined,404);
  await admin(b,'events/'+ea.id,'PATCH',{status:'registration'},404);
  await admin(a,'events/'+ea.id+'/reference','PUT',{mimeType:'image/webp',data:image});
  const library=await(await account(a,'library')).json();assert.equal(library.references.length,1);

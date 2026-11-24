@@ -5,6 +5,7 @@
 /leaderboard.html /leaderboard 301!
 /demo.html /demo 301!
 /share.html /share 301!
+/present.html /present 301!
 
 # Serve the existing multi-page build at clean URLs.
 /admin /admin.html 200
@@ -12,3 +13,4 @@
 /leaderboard /leaderboard.html 200
 /demo /demo.html 200
 /share /share.html 200
+/present /present.html 200

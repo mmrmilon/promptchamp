@@ -59,6 +59,8 @@ jobs:
         run: npm run check
       - name: Test runtime configuration synchronization
         run: node --test scripts/test-runtime-env.mjs
+      - name: Verify registration QR codes decode correctly
+        run: node --test scripts/test-registration-qr.mjs
       - name: Run isolated database integration tests
         run: npm run test:ci
 

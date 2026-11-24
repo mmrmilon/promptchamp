@@ -369,6 +369,7 @@ Open [http://localhost:5173](http://localhost:5173). The dev server serves both 
 | `/admin` | Registration, login, workspace dashboard, and event controls |
 | `/event?event=your-event-slug` | Team registration, lucky number, and timed challenge |
 | `/leaderboard?event=your-event-slug` | Published leaderboard |
+| `/share?event=your-event-slug` | Large-screen registration QR code with full-screen controls |
 | `/demo` | Original offline demonstration |
 
 Old `.html` routes redirect to their clean equivalents while retaining query parameters.
@@ -411,7 +412,7 @@ New customer workspaces start with demo access. A platform administrator must en
 1. In **Events**, create a draft with a title, unique slug, schedule, team capacity, **2- or 3-minute timer**, and demo/live mode.
 2. Upload a PNG, JPEG, or WebP reference under 2 MiB, or reuse a reference from the workspace library. Every team receives this same image.
 3. Review the generation safety cap under advanced settings. It bounds real AI requests in addition to the workspace's monthly allowance.
-4. Open registration and share the generated `/event?event=...` link.
+4. Open registration. The team queue shows the `/event?event=...` link and a QR code for that exact address. Choose **Show on big screen** to open the presentation view, then **Full screen** (or F11) on your projector. Each team scans with its phone camera and joins through the existing registration flow. You can also copy the link or download the QR as an SVG. The presentation checks registration status every 15 seconds and hides the registration QR when the draw is locked. QR images are generated locally in the browser; no third-party QR service receives the event link.
 5. After teams join and choose available lucky numbers, close registration and lock the draw. Lower lucky numbers play first.
 6. Call the next team. Only the called team can press **Start**. A team can be skipped and recalled before it starts.
 7. Monitor accepted submissions and processing. For judging failures, retry using the saved image. Uncertain generation calls require a deliberate host decision; generating again consumes another quota reservation.

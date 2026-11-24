@@ -5,6 +5,7 @@ import { attachQueue } from './admin-queue';
 import './style.css';
 import './admin.css';
 import './admin-sidebar.css';
+import './registration-share.css';
 
 type Event = { id: string; title: string; slug: string; scheduled_at: string; status: string; generation_cap: number; duration_seconds: number; team_capacity: number; mode: string; has_reference: boolean };
 let workspace = document.querySelector<HTMLElement>('#workspace')!;

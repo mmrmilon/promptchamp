@@ -1,0 +1,13 @@
+.host-queue .registration-share{display:grid;grid-template-columns:180px minmax(0,1fr);gap:24px;align-items:center;margin:20px 0 24px;padding:20px;background:#f6f8ef;border:1px solid #dee5d2;border-radius:14px}
+.registration-qr-preview{background:#fff;border:1px solid #e2e7d8;border-radius:12px;min-height:180px;display:grid;place-items:center;padding:0;overflow:hidden}
+.registration-qr-preview img{width:180px;height:180px;display:block;max-width:100%}
+.registration-qr-preview>span{font-size:12px;color:#77836a;text-align:center;padding:12px}
+.registration-share-details{min-width:0}
+.registration-share-details h3{margin-top:7px;font-size:21px;letter-spacing:-.4px}
+.host-queue .registration-share-details p{font-size:13px;line-height:1.7;margin-top:9px}
+.registration-share-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:16px}
+.host-queue .registration-share-actions a.button{color:white;text-decoration:none;font-size:12px}
+.registration-share-actions button{padding:10px 12px;border:1px solid #cad5b9;border-radius:8px;color:#42562f;background:#fffef8;font-size:12px;font-weight:600}
+.host-queue .registration-share-actions .registration-download{font-size:12px}
+.host-queue .registration-share-status{min-height:21px;color:#5d7346}
+@media(max-width:640px){.host-queue .registration-share{grid-template-columns:1fr;justify-items:center;gap:16px;padding:16px}.registration-share-details{width:100%}.registration-share-details h3{font-size:19px}.registration-qr-preview{width:180px}}

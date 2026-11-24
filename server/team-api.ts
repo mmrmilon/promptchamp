@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { eventDb } from './event-store';
 import { queueGeneration, wakeWorker, workerReady } from './processing';
 import {weightedScore} from './challenges';
+import {assignReferences,entryReference} from './references';
 
 const json = (value: unknown, status = 200, headers = {}) => Response.json(value, { status, headers: { 'Cache-Control':'no-store', ...headers } });
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -28,6 +29,7 @@ async function queue(sql: any, id: string) {
     where n.event_id=${id} and n.is_current order by n.queue_position nulls last,n.lucky_number nulls last,t.name`;
 }
 function failure(error: any) {
+  if(error.message==='REFERENCE_POOL_SHORT')return json({error:'Add at least one different reference image per registered team before locking the draw.'},409);
   if (error instanceof RuleError) return json({error:error.message},error.status);
   if (error.message==='GENERATION_CAP') return json({error:'The event image limit has been reached. Ask the host for help.'},409);
   if(error.message==='WORKSPACE_CAP')return json({error:'The workspace has reached its monthly AI allowance.'},409);
@@ -55,6 +57,7 @@ export async function hostQueue(id: string, action: string | undefined, method: 
         if (event.status !== 'registration') throw new RuleError('Open registration before locking the draw.');
         const entries = await tx`select id,lucky_number from promptchamp.round_entries where round_id=${round.id} and is_current`;
         if (!entries.length || entries.some(e => !e.lucky_number)) throw new RuleError('Every registered team must choose a number first.');
+        await assignReferences(tx,event,round.id);
         await tx`with ordered as (select id,row_number() over(order by lucky_number)::int as position
           from promptchamp.round_entries where round_id=${round.id} and is_current)
           update promptchamp.round_entries e set queue_position=o.position from ordered o where e.id=o.id`;
@@ -102,7 +105,7 @@ export default async function teamApi(request: Request) {
     }
     const publicPath = url.pathname.match(/^\/api\/events\/([a-z0-9-]{3,100})$/);
     if (publicPath && request.method === 'GET') {
-      const [event] = await sql`select e.id,e.slug,e.title,e.status,e.scheduled_at,e.team_capacity,e.mode,r.duration_seconds
+      const [event] = await sql`select e.id,e.slug,e.title,e.status,e.scheduled_at,e.team_capacity,e.mode,e.reference_mode,r.duration_seconds
         from promptchamp.events e join promptchamp.rounds r on r.event_id=e.id and r.sequence=1 join promptchamp.workspaces w on w.id=e.workspace_id
         where e.slug=${publicPath[1]} and e.status in ('registration','live','completed') and w.status='active'`;
       return event ? json({event}) : json({error:'This event is not open yet. Check the link with your host.'},404);
@@ -154,12 +157,12 @@ export default async function teamApi(request: Request) {
         (s.generated_data is not null) as has_image
         from promptchamp.round_entries n left join promptchamp.submissions s on s.entry_id=n.id where n.team_id=${team.id} and n.is_current`;
       const [clock] = await sql`select clock_timestamp() as now`;
-      const [event] = await sql`select status,team_capacity,results_visibility,mode from promptchamp.events where id=${id}`;
+      const [event] = await sql`select status,team_capacity,results_visibility,mode,reference_mode from promptchamp.events where id=${id}`;
       return json({team,entry,event,queue:await queue(sql,id),serverNow:new Date(clock.now).getTime()});
     }
     if (action === 'reference') {
-      const [image] = await sql`select i.mime_type,i.data from promptchamp.reference_images i join promptchamp.round_entries n on n.event_id=i.event_id
-        where n.event_id=${id} and n.team_id=${team.id} and n.is_current and n.started_at is not null`;
+      const [entry]=await sql`select id from promptchamp.round_entries where event_id=${id} and team_id=${team.id} and is_current and started_at is not null`;
+      const image=entry?await entryReference(sql,entry.id):null;
       return image ? new Response(Buffer.from(image.data,'base64'),{headers:{'Content-Type':image.mime_type,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}}):json({error:'The reference is revealed when your turn starts.'},403);
     }
     if(action==='image') {
@@ -190,6 +193,7 @@ export default async function teamApi(request: Request) {
       if (action === 'start') {
         if (entry.started_at) return {startedAt:entry.started_at,deadlineAt:entry.deadline_at};
         if (entry.state !== 'called') throw new RuleError('Wait for the host to call your team.');
+        if(!await entryReference(tx,entry.id))throw new RuleError('Your assigned reference is unavailable. Ask the host for help.',409);
         if(event.mode==='live'&&!workspace.live_enabled)throw new RuleError('Workspace live access is not enabled.',403);
         if(event.mode==='live'&&!ready)throw new RuleError('AI processing is not ready. Ask the host before starting.',503);
         const [round] = await tx`select duration_seconds from promptchamp.rounds where id=${entry.round_id}`;
@@ -214,7 +218,7 @@ export default async function teamApi(request: Request) {
         if (!accepted) throw new RuleError('Time is up. Submission was not accepted.');
         if(event.mode==='demo'){
           const bytes=createHash('sha256').update(prompt).digest();const ratings=Array.from({length:5},(_,i)=>1+bytes[i]%5);const score=weightedScore(ratings);
-          const [image]=await tx`select data,mime_type from promptchamp.reference_images where event_id=${id}`;
+          const image=await entryReference(tx,entry.id);if(!image)throw new RuleError('Assigned reference unavailable.',409);
           await tx`update promptchamp.submissions set status='scored',score=${score},ratings=${JSON.stringify(ratings)}::jsonb,tip='Demo score only. This is a sample recreation, not an AI-generated match.',generated_data=${image.data},generated_mime=${image.mime_type},image_expires_at=now()+interval '30 days' where id=${accepted.id}`;
           await tx`update promptchamp.round_entries set state='completed',draft_prompt=${prompt} where id=${entry.id}`;
           return {submission:{...accepted,status:'scored'}};

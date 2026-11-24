@@ -8,7 +8,7 @@ PromptChamp is a team image-prompt challenge platform. A host prepares a referen
 
 The idea grew out of the monthly **IT Connect** office event, where teams take turns hosting quizzes, tasks, and question-answering activities. PromptChamp adds a creative challenge: how well can a team describe an image to an AI image generator?
 
-The hosting team creates an event and preloads a reference image. Participating teams enter their team names and choose lucky numbers, which determine their playing order. Everyone receives the same reference image. When the host calls a team, that team presses **Start**, revealing the reference and starting its own host-configured **2- or 3-minute timer**. Teams submit a prompt before the deadline, then compare their recreation and visual-match score.
+The hosting team creates an event and preloads a reference image. Participating teams enter their team names and choose lucky numbers, which determine their playing order. Shared mode gives everyone the same reference; random unique mode gives each team a different image. When the host calls a team, that team presses **Start**, revealing the reference and starting its own host-configured **2- or 3-minute timer**. Teams submit a prompt before the deadline, then compare their recreation and visual-match score.
 
 The platform has since expanded to support separate customer workspaces, verified administrator accounts, host invitations, demo/live events, and workspace usage limits. This provides a foundation for a future subscription service. **Payments and subscription billing are not implemented yet.**
 
@@ -21,6 +21,7 @@ The platform has since expanded to support separate customer workspaces, verifie
 - Demo events with sample images and simulated scores; live events with real image generation and judging.
 - Durable background processing, event generation caps, and workspace monthly allowances.
 - Held results, published leaderboards, scoring recovery, and CSV export.
+- Optional random unique references per team and a host-only current-team presentation; see [image assignment guide](docs/random-references.md).
 - Automated checks, environment synchronization, database migrations, and production deployment through GitHub Actions.
 
 ## 2. Application architecture
@@ -190,6 +191,8 @@ erDiagram
 ```mermaid
 erDiagram
     events ||--o| reference_images : "has private reference"
+    events ||--o{ reference_pool_images : "has random image pool"
+    reference_pool_images o|--o{ round_entries : "assigned reference"
     events ||--o{ rounds : contains
     events ||--o{ teams : registers
     events ||--o{ round_entries : scopes
@@ -226,6 +229,7 @@ erDiagram
     }
     round_entries {
         uuid id PK
+        uuid reference_image_id FK
         uuid event_id FK
         uuid round_id FK
         uuid team_id FK
@@ -271,6 +275,7 @@ The diagrams show the main relationships and selected columns, not every field. 
 | --- | --- |
 | `events` | Workspace-owned event, unique slug, schedule, team capacity, demo/live mode, generation cap, and result visibility |
 | `reference_images` | At most one private reference per event; PNG/JPEG/WebP uploads are limited to 2 MiB |
+| `reference_pool_images` | Random-mode image pool, with unique file hashes per event. Current turns have saved assignments from their own event, without repeats in the round |
 | `rounds` | Event rounds with 120- or 180-second duration. The current event flow operates round sequence 1 |
 | `teams`, `team_sessions` | Unique normalized team name per event, hashed recovery code, and expiring hashed session tokens |
 | `round_entries` | Team turn, lucky number, queue position, persisted start/deadline, draft, and revision. Partial unique indexes prevent conflicting current turns and lucky numbers |
@@ -370,6 +375,7 @@ Open [http://localhost:5173](http://localhost:5173). The dev server serves both 
 | `/event?event=your-event-slug` | Team registration, lucky number, and timed challenge |
 | `/leaderboard?event=your-event-slug` | Published leaderboard |
 | `/share?event=your-event-slug` | Large-screen registration QR code with full-screen controls |
+| `/present?event=EVENT_UUID` | Host-only current-team reference, timer, prompt and result presentation |
 | `/demo` | Original offline demonstration |
 
 Old `.html` routes redirect to their clean equivalents while retaining query parameters.
@@ -410,15 +416,15 @@ New customer workspaces start with demo access. A platform administrator must en
 ### Host an event
 
 1. In **Events**, create a draft with a title, unique slug, schedule, team capacity, **2- or 3-minute timer**, and demo/live mode.
-2. Upload a PNG, JPEG, or WebP reference under 2 MiB, or reuse a reference from the workspace library. Every team receives this same image.
+2. Choose **Shared image** for the existing one-image challenge, or **Random unique** for different references. Shared mode accepts one PNG/JPEG/WebP under 2 MiB or a reused workspace reference. Random mode accepts a pool with at least one distinct image per registered team before locking. See [random references](docs/random-references.md).
 3. Review the generation safety cap under advanced settings. It bounds real AI requests in addition to the workspace's monthly allowance.
 4. Open registration. The team queue shows the `/event?event=...` link and a QR code for that exact address. Choose **Show on big screen** to open the presentation view, then **Full screen** (or F11) on your projector. Each team scans with its phone camera and joins through the existing registration flow. You can also copy the link or download the QR as an SVG. The presentation checks registration status every 15 seconds and hides the registration QR when the draw is locked. QR images are generated locally in the browser; no third-party QR service receives the event link.
 5. After teams join and choose available lucky numbers, close registration and lock the draw. Lower lucky numbers play first.
-6. Call the next team. Only the called team can press **Start**. A team can be skipped and recalled before it starts.
+6. Call the next team. Only the called team can press **Start**. A team can be skipped and recalled before it starts. Choose **Present current team** to project its reference, timer, submitted prompt and result. Future assignments stay hidden.
 7. Monitor accepted submissions and processing. For judging failures, retry using the saved image. Uncertain generation calls require a deliberate host decision; generating again consumes another quota reservation.
 8. Once turns and outstanding results are resolved, publish the final leaderboard and share its clean link. Export results as CSV if needed.
 
-Event settings and the reference freeze once teams register. Use a separate rehearsal event for testing. Keep the active team's screen away from waiting teams so the shared reference is not revealed early.
+Event settings and the shared reference freeze once teams register. A random image pool can be expanded until the draw locks. Use a separate rehearsal event for testing. Keep the active team's screen away from waiting teams so the shared reference is not revealed early.
 
 ### Participate as a team
 
@@ -429,7 +435,7 @@ Event settings and the reference freeze once teams register. Use a separate rehe
 5. Submission is final. In live mode, the image is generated and scored after acceptance. You may return later using the team session or recovery code.
 6. View your saved result and, after the host releases it, the final leaderboard.
 
-Refreshing or recovering on another device does not restart the timer. Expired drafts are not submitted automatically. The lucky number chooses order, not a different image.
+Refreshing or recovering on another device does not restart the timer. Expired drafts are not submitted automatically. The lucky number chooses playing order. In random mode, image assignments are drawn separately and stay fixed.
 
 ### Understand the score and AI budget
 

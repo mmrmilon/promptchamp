@@ -2,6 +2,7 @@ import { randomUUID, createHmac, timingSafeEqual } from 'node:crypto';
 import { eventDb } from './event-store';
 import { generate } from './image-generation';
 import { judgeReference } from './image-judging';
+import {entryReference} from './references';
 
 export const aiConfigured = () => !!(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN && process.env.GEMINI_JUDGE_API_KEY);
 const hosted = () => !!(process.env.URL && process.env.SITE_ID);
@@ -64,12 +65,13 @@ export async function processNext(providers = {generate,judge:judgeReference}, s
   });
   if (!job) return false;
   try {
-    const [submission] = await sql`select s.*,r.mime_type as reference_mime,r.data as reference_data,e.mode,w.status as workspace_status,w.live_enabled from promptchamp.submissions s
-      join promptchamp.reference_images r on r.event_id=s.event_id join promptchamp.events e on e.id=s.event_id join promptchamp.workspaces w on w.id=e.workspace_id where s.id=${job.submission_id}`;
+    const [submission] = await sql`select s.*,e.mode,w.status as workspace_status,w.live_enabled from promptchamp.submissions s
+      join promptchamp.events e on e.id=s.event_id join promptchamp.workspaces w on w.id=e.workspace_id where s.id=${job.submission_id}`;
     if (!submission) throw new Error('Submission reference unavailable');
+    const reference=await entryReference(sql,submission.entry_id);if(!reference)throw new Error('Assigned reference unavailable');
     if(submission.mode!=='live'||submission.workspace_status!=='active'||!submission.live_enabled)throw new Error('Workspace live access unavailable');
     const result = job.kind==='generate' ? await providers.generate(submission.prompt) :
-      await providers.judge({mimeType:submission.reference_mime,data:submission.reference_data},{mimeType:submission.generated_mime,data:submission.generated_data});
+      await providers.judge({mimeType:reference.mime_type,data:reference.data},{mimeType:submission.generated_mime,data:submission.generated_data});
     await sql.begin(async tx => {
       const [owned] = await tx`select id from promptchamp.processing_jobs where id=${job.id} and state='running' and lease_token=${token} and lease_until>clock_timestamp() for update`;
       if (!owned) return;

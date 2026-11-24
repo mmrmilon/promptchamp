@@ -4,6 +4,8 @@ import { hostQueue } from './team-api';
 import { hostResults } from './results-api';
 import { aiConfigured,workerReady } from './processing';
 import {AccountError,accountContext,legacyAllowed,OFFICE_WORKSPACE,signOutAccount} from './account-session';
+import {referencePoolApi} from './reference-pool-api';
+import {presentationApi} from './presentation-api';
 
 const json = (value: unknown, status = 200, headers = {}) => Response.json(value, {
   status, headers: { 'Cache-Control': 'no-store', ...headers },
@@ -50,9 +52,13 @@ export default async function eventApi(request: Request) {
     if(workspace.status!=='active'&&request.method!=='GET')return json({error:'This workspace is suspended.'},403);
     const target=path.match(/^\/api\/admin\/events\/([a-f0-9-]{36})(?:\/|$)/i);
     let targetEvent:any;
-    if(target){[targetEvent]=await db()`select id,mode from promptchamp.events where id=${target[1]} and workspace_id=${workspace.id}`;if(!targetEvent)return json({error:'Event not found.'},404);}
+    if(target){[targetEvent]=await db()`select id,mode,reference_mode from promptchamp.events where id=${target[1]} and workspace_id=${workspace.id}`;if(!targetEvent)return json({error:'Event not found.'},404);}
     if (path === '/api/admin/session' && request.method === 'GET') return json({ authenticated: true,legacy:context.legacy,workspace,role:context.role,aiConfigured:aiConfigured(),workerReady:await workerReady() });
     const sql = db();
+    const pool=path.match(/^\/api\/admin\/events\/([a-f0-9-]{36})\/references(?:\/([a-f0-9-]{36}))?$/i);
+    if(pool)return await referencePoolApi(sql,pool[1],pool[2],request.method,body,referenceImage);
+    const presentation=path.match(/^\/api\/admin\/events\/([a-f0-9-]{36})\/presentation(?:\/(reference|image))?$/i);
+    if(presentation)return request.method==='GET'?await presentationApi(sql,presentation[1],presentation[2],url):json({error:'Method not allowed.'},405);
     const extra=path.match(/^\/api\/admin\/events\/([a-f0-9-]{36})\/(duplicate|archive|export)$/i);
     if(extra){
       const eventId=extra[1];
@@ -65,9 +71,10 @@ export default async function eventApi(request: Request) {
       if(extra[2]==='duplicate'&&request.method==='POST'){
         const event=await sql.begin(async tx=>{const [old]=await tx`select e.*,r.duration_seconds from promptchamp.events e join promptchamp.rounds r on r.event_id=e.id and r.sequence=1 where e.id=${eventId}`;
           const mode=old.mode==='live'&&!workspace.live_enabled?'demo':old.mode;
-          const [copy]=await tx`insert into promptchamp.events(title,slug,scheduled_at,generation_cap,team_capacity,workspace_id,mode) values(${(old.title+' (copy)').slice(0,100)},${old.slug.slice(0,70)+'-'+crypto.randomUUID().slice(0,8)},${old.scheduled_at},${old.generation_cap},${old.team_capacity},${workspace.id},${mode}) returning *`;
+          const [copy]=await tx`insert into promptchamp.events(title,slug,scheduled_at,generation_cap,team_capacity,workspace_id,mode,reference_mode) values(${(old.title+' (copy)').slice(0,100)},${old.slug.slice(0,70)+'-'+crypto.randomUUID().slice(0,8)},${old.scheduled_at},${old.generation_cap},${old.team_capacity},${workspace.id},${mode},${old.reference_mode}) returning *`;
           await tx`insert into promptchamp.rounds(event_id,duration_seconds) values(${copy.id},${old.duration_seconds})`;
           await tx`insert into promptchamp.reference_images(event_id,mime_type,data) select ${copy.id},mime_type,data from promptchamp.reference_images where event_id=${old.id}`;
+          await tx`insert into promptchamp.reference_pool_images(event_id,label,mime_type,data,image_hash) select ${copy.id},label,mime_type,data,image_hash from promptchamp.reference_pool_images where event_id=${old.id}`;
           await tx`insert into promptchamp.audit_events(event_id,action) values(${copy.id},'event_duplicated')`;return copy;});return json({event},201);
       }
       if(extra[2]==='archive'&&request.method==='POST'){
@@ -83,7 +90,8 @@ export default async function eventApi(request: Request) {
     if (control) return hostQueue(control[1], control[2], request.method, body);
     if (path === '/api/admin/events' && request.method === 'GET') {
       return json({ workspace,legacy:!!context.legacy,events: await sql`select e.*, r.duration_seconds,
-        exists(select 1 from promptchamp.reference_images i where i.event_id=e.id) as has_reference
+        exists(select 1 from promptchamp.reference_images i where i.event_id=e.id) as has_reference,
+        (select count(*)::int from promptchamp.reference_pool_images p where p.event_id=e.id) as reference_count
         from promptchamp.events e join promptchamp.rounds r on r.event_id=e.id and r.sequence=1 where e.workspace_id=${workspace.id}
         order by e.created_at desc` });
     }
@@ -92,6 +100,8 @@ export default async function eventApi(request: Request) {
       const slug = typeof body.slug === 'string' ? body.slug.trim().toLowerCase() : '';
       const time = Date.parse(body.scheduledAt);
       const mode=body.mode??workspace.default_mode;
+      const referenceMode=body.referenceMode??'shared';
+      if(!['shared','random_unique'].includes(referenceMode))return json({error:'Choose an image assignment mode.'},400);
       if(!['demo','live'].includes(mode))return json({error:'Choose demo or live mode.'},400);
       if(mode==='live'&&!workspace.live_enabled)return json({error:'Live access needs platform approval.'},403);
       if (title.length < 3 || title.length > 100 || !/^[a-z0-9-]{3,100}$/.test(slug) ||
@@ -101,8 +111,8 @@ export default async function eventApi(request: Request) {
         return json({ error: 'Check the title, event address, date, duration, and budget.' }, 400);
       }
       const [event] = await sql.begin(async tx => {
-        const [event] = await tx`insert into promptchamp.events(title,slug,scheduled_at,generation_cap,team_capacity,workspace_id,mode)
-          values(${title},${slug},${new Date(time).toISOString()},${body.generationCap},${body.teamCapacity ?? 20},${workspace.id},${mode}) returning *`;
+        const [event] = await tx`insert into promptchamp.events(title,slug,scheduled_at,generation_cap,team_capacity,workspace_id,mode,reference_mode)
+          values(${title},${slug},${new Date(time).toISOString()},${body.generationCap},${body.teamCapacity ?? 20},${workspace.id},${mode},${referenceMode}) returning *`;
         await tx`insert into promptchamp.rounds(event_id,duration_seconds) values(${event.id},${body.durationSeconds})`;
         await tx`insert into promptchamp.audit_events(event_id,action) values(${event.id},'event_created')`;
         return [event];
@@ -119,6 +129,7 @@ export default async function eventApi(request: Request) {
       } }) : json({ error: 'Reference not found.' }, 404);
     }
     if (match[2] && request.method === 'PUT') {
+      if(targetEvent.reference_mode==='random_unique')return json({error:'Add images through the random reference pool.'},409);
       if(body.referenceId){const [image]=await sql`select i.mime_type,i.data from promptchamp.reference_images i join promptchamp.events e on e.id=i.event_id where i.id=${body.referenceId} and e.workspace_id=${workspace.id}`;
         if(!image)return json({error:'Reference not found in this workspace.'},404);body.mimeType=image.mime_type;body.data=image.data;}
       if (!referenceImage(body.mimeType, body.data)) return json({ error: 'Choose a PNG, JPEG, or WebP image under 2 MiB.' }, 400);
@@ -135,6 +146,8 @@ export default async function eventApi(request: Request) {
     if (!match[2] && request.method === 'PATCH') {
       if (body.status === undefined) {
         const mode=body.mode??targetEvent.mode;
+        const referenceMode=body.referenceMode??targetEvent.reference_mode;
+        if(!['shared','random_unique'].includes(referenceMode))return json({error:'Choose an image assignment mode.'},400);
         if(!['demo','live'].includes(mode))return json({error:'Choose demo or live mode.'},400);
         if(mode==='live'&&!workspace.live_enabled)return json({error:'Live access needs platform approval.'},403);
         const title = typeof body.title === 'string' ? body.title.trim() : '';
@@ -149,7 +162,7 @@ export default async function eventApi(request: Request) {
           const [count] = await tx`select count(*)::int as total from promptchamp.teams where event_id=${id}`;
           if (count.total) return false;
           await tx`update promptchamp.events set title=${title},scheduled_at=${new Date(time).toISOString()},
-            generation_cap=${body.generationCap},team_capacity=${body.teamCapacity ?? 20},mode=${mode},updated_at=now() where id=${id}`;
+            generation_cap=${body.generationCap},team_capacity=${body.teamCapacity ?? 20},mode=${mode},reference_mode=${referenceMode},updated_at=now() where id=${id}`;
           await tx`update promptchamp.rounds set duration_seconds=${body.durationSeconds} where event_id=${id} and sequence=1`;
           await tx`insert into promptchamp.audit_events(event_id,action) values(${id},'settings_updated')`;
           return true;
@@ -158,11 +171,11 @@ export default async function eventApi(request: Request) {
       }
       if (!['draft','registration'].includes(body.status)) return json({ error: 'Only draft and registration are available in this setup release.' }, 400);
       const changed = await sql.begin(async tx => {
-        const [event] = await tx`select status from promptchamp.events where id=${id} for update`;
+        const [event] = await tx`select status,reference_mode from promptchamp.events where id=${id} for update`;
         if (!event || !['draft','registration'].includes(event.status)) return false;
         const [count] = await tx`select count(*)::int as total from promptchamp.teams where event_id=${id}`;
         if (body.status === 'draft' && count.total) return false;
-        const [image] = await tx`select id from promptchamp.reference_images where event_id=${id}`;
+        const [image] = event.reference_mode==='random_unique'?await tx`select id from promptchamp.reference_pool_images where event_id=${id} limit 1`:await tx`select id from promptchamp.reference_images where event_id=${id}`;
         if (body.status === 'registration' && !image) return false;
         await tx`update promptchamp.events set status=${body.status},updated_at=now() where id=${id}`;
         await tx`insert into promptchamp.audit_events(event_id,action,metadata)

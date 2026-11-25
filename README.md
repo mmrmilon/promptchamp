@@ -20,7 +20,7 @@ The platform has since expanded to support separate customer workspaces, verifie
 - Server-enforced turn deadlines, automatic draft saving, and team recovery codes.
 - Demo events with sample images and simulated scores; live events with real image generation and judging.
 - Durable background processing, event generation caps, and workspace monthly allowances.
-- Held results, published leaderboards, scoring recovery, and CSV export.
+- Held results, published image-gallery leaderboards, scoring recovery, and CSV export.
 - Optional random unique references per team and a host-only current-team presentation; see [image assignment guide](docs/random-references.md).
 - Automated checks, environment synchronization, database migrations, and production deployment through GitHub Actions.
 
@@ -422,7 +422,7 @@ New customer workspaces start with demo access. A platform administrator must en
 5. After teams join and choose available lucky numbers, close registration and lock the draw. Lower lucky numbers play first.
 6. Call the next team. Only the called team can press **Start**. A team can be skipped and recalled before it starts. Choose **Present current team** to project its reference, timer, submitted prompt and result. Future assignments stay hidden.
 7. Monitor accepted submissions and processing. For judging failures, retry using the saved image. Uncertain generation calls require a deliberate host decision; generating again consumes another quota reservation.
-8. Once turns and outstanding results are resolved, publish the final leaderboard and share its clean link. Export results as CSV if needed.
+8. Once turns and outstanding results are resolved, publish the final leaderboard and share its clean link. Each scored team shows its saved generated image, rank and match percentage. Select an image to enlarge it, use Previous/Next team or the arrow keys, and choose Full screen (or F11) for the projector. Demo events label sample images and simulated scores. Images stay private until publication; older results without a saved image show a placeholder. Export results as CSV if needed.
 
 Event settings and the shared reference freeze once teams register. A random image pool can be expanded until the draw locks. Use a separate rehearsal event for testing. Keep the active team's screen away from waiting teams so the shared reference is not revealed early.
 

@@ -7,6 +7,7 @@ import {AccountError,accountContext,legacyAllowed,OFFICE_WORKSPACE,signOutAccoun
 import {referencePoolApi} from './reference-pool-api';
 import {presentationApi} from './presentation-api';
 import {eventSettingsErrors} from './event-validation';
+import {normalizeEventAddress} from '../event-address';
 
 const json = (value: unknown, status = 200, headers = {}) => Response.json(value, {
   status, headers: { 'Cache-Control': 'no-store', ...headers },
@@ -98,7 +99,7 @@ export default async function eventApi(request: Request) {
     }
     if (path === '/api/admin/events' && request.method === 'POST') {
       const title = typeof body.title === 'string' ? body.title.trim() : '';
-      const slug = typeof body.slug === 'string' ? body.slug.trim().toLowerCase() : '';
+      const slug = normalizeEventAddress(body.slug);
       const time = Date.parse(body.scheduledAt);
       const mode=body.mode??workspace.default_mode;
       const referenceMode=body.referenceMode??'shared';

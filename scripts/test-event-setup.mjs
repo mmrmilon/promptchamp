@@ -7,6 +7,7 @@ if(existsSync('.env'))process.loadEnvFile('.env');
 const base = 'http://localhost:5174';
 let cookie = '';
 let eventId;
+let normalizedEventId;
 let checks = 0;
 async function request(path, method = 'GET', body, expected = 200, origin = base) {
   const response = await fetch(base + '/api/admin/' + path, { method,
@@ -31,12 +32,23 @@ try {
   // Invalid settings identify the offending control, including fields inside
   // the collapsed advanced section. Rejections must not create partial drafts.
   const before=(await(await request('events')).json()).events.length;
-  for(const [field,value] of [['title','  IT  '],['slug','office event'],['scheduledAt','invalid'],['durationSeconds',30],['generationCap',0],['generationCap',10001],['teamCapacity',101]]){
+  for(const [field,value] of [['title','  IT  '],['slug','office/event'],['scheduledAt','invalid'],['durationSeconds',30],['generationCap',0],['generationCap',10001],['teamCapacity',101]]){
     const rejected=await(await request('events','POST',{...settings,[field]:value},400)).json();
     assert.deepEqual(Object.keys(rejected.fields),[field]);
     assert.equal(rejected.error,rejected.fields[field]);
   }
   assert.equal((await(await request('events')).json()).events.length,before);
+  // Reproduce the host's failed payload; title-like addresses become clean URLs.
+  const reported={title:'IT Connect - December Prompt Challenge 3',mode:'live',slug:'FxOnline Team 101',scheduledAt:'2026-11-25T03:00:00.000Z',durationSeconds:180,generationCap:100,teamCapacity:10};
+  const normalized=await(await request('events','POST',reported,201)).json();
+  normalizedEventId=normalized.event.id;
+  assert.equal(normalized.event.slug,'fxonline-team-101');
+  await request('events','POST',{...reported,slug:'fxonline-team-101'},409);
+  const source=await readFile('admin.ts','utf8');
+  const pattern=source.match(/name="slug"[^>]*pattern="([^"]+)"/)[1];
+  const addressPattern=new RegExp('^(?:'+pattern+')$','v');
+  assert.ok(addressPattern.test(reported.slug));
+  assert.equal(addressPattern.test('office/event'),false);
   const created = await (await request('events','POST',settings,201)).json();
   eventId = created.event.id;
   const rejectedEdit=await(await request(`events/${eventId}`,'PATCH',{...settings,generationCap:0},400)).json();
@@ -72,11 +84,11 @@ try {
   assert.ok(original.players && original.attempts);
   console.log(`PASS: ${checks} API checks, private image access, date conversion, RLS, and legacy tables.`);
 } finally {
-  if (eventId) await sql.begin(async tx => {
-    await tx`delete from promptchamp.audit_events where event_id=${eventId}`;
-    await tx`delete from promptchamp.reference_images where event_id=${eventId}`;
-    await tx`delete from promptchamp.rounds where event_id=${eventId}`;
-    await tx`delete from promptchamp.events where id=${eventId}`;
+  for(const id of [eventId,normalizedEventId].filter(Boolean))await sql.begin(async tx => {
+    await tx`delete from promptchamp.audit_events where event_id=${id}`;
+    await tx`delete from promptchamp.reference_images where event_id=${id}`;
+    await tx`delete from promptchamp.rounds where event_id=${id}`;
+    await tx`delete from promptchamp.events where id=${id}`;
   });
   await sql.end({timeout:2});
 }

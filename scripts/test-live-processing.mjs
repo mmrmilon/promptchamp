@@ -32,6 +32,8 @@ try{
  await call(a,teamPath('submit'),'POST',payload);
  let [used]=await sql`select count(*)::int as total from promptchamp.generation_reservations where event_id=${eventId}`;assert.equal(used.total,1);
  const boardPath='/api/events/'+slug+'/leaderboard';
+ const publishedImagePath=boardPath+'/'+submission.id+'/image';
+ await call({cookie:''},publishedImagePath,'GET',undefined,404);
  assert.equal((await(await call(a,boardPath)).json()).released,false);
  await call(host,hostPath('/results/publish'),'POST',{},409);
  if(live){
@@ -67,6 +69,9 @@ try{
  }
  await call(host,hostPath('/results/publish'),'POST',{});
  const board=await(await call(a,boardPath)).json();assert.equal(board.released,true);assert.equal(board.rows.length,1);assert.equal(board.rows[0].rank,1);
+ assert.equal(board.rows[0].imageUrl,publishedImagePath);
+ const publicImage=await call({cookie:''},publishedImagePath);assert.equal(publicImage.headers.get('content-type'),'image/webp');
+ if(!live)assert.equal(Buffer.from(await publicImage.arrayBuffer()).toString('base64'),image);
  await call(host,hostPath('/results/retry-scoring'),'POST',{submissionId:submission.id},409);
  [used]=await sql`select count(*)::int as total from promptchamp.generation_reservations where event_id=${eventId}`;assert.equal(used.total,live?1:2);
  console.log(live?`PASS: real image generation, reference judging (${result.entry.score}/100), saved image, and final leaderboard publication.`:'PASS: durable processing, exclusive job claims, scoring recovery without regeneration, generation cap, expired leases, result privacy, and publication locking.');

@@ -7,6 +7,7 @@ if(process.env.CI!=='true'||!['localhost','127.0.0.1'].includes(url.hostname)||u
 const sql=postgres(process.env.DATABASE_URL,{prepare:false,max:1,ssl:false}),base='http://localhost:5174';
 const {processNext}=await import('../.netlify/local/processing-test.mjs');
 const host={cookie:''},events=[],worker=randomUUID();let checks=0;
+let galleryWorkspace;
 const images=await Promise.all(['#ff0000','#00ff00','#0000ff','#ffff00','#ff00ff'].map(async color=>(await sharp({create:{width:40,height:40,channels:3,background:color}}).png().toBuffer()).toString('base64')));
 async function call(client,path,method='GET',body,status=200){const r=await fetch(base+path,{method,headers:{Origin:base,Cookie:client.cookie,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(20000)});assert.equal(r.status,status,method+' '+path+' '+await(r.status===status?Promise.resolve(''):r.text()));checks++;if(r.headers.has('set-cookie'))client.cookie=r.headers.get('set-cookie').split(';')[0];return r;}
 const admin=(event,path='',method='GET',body,status=200)=>call(host,`/api/admin/events/${event.id}${path}`,method,body,status);
@@ -52,6 +53,39 @@ try{
   if(i<4)await team(teams[i+1],event,'reference','GET',undefined,403);
  }
  assert.equal((await sql`select id from promptchamp.processing_jobs where submission_id in(select id from promptchamp.submissions where event_id=${event.id})`).length,0);
+ // Publication reveals each team's own saved recreation without embedding bytes
+ // in the polling response. Guessed URLs must obey the same publication gate.
+ const boardPath=`/api/events/${event.slug}/leaderboard`;
+ const outputs=await sql`select s.id,s.generated_data,s.entry_id,n.team_id from promptchamp.submissions s join promptchamp.round_entries n on n.id=s.entry_id where s.event_id=${event.id}`;
+ const publicGet=(path,status=200)=>call({cookie:''},path,'GET',undefined,status);
+ assert.deepEqual((await(await publicGet(boardPath)).json()).rows,[]);
+ for(const output of outputs)await publicGet(`${boardPath}/${output.id}/image`,404);
+ await sql`update promptchamp.submissions set score=80 where event_id=${event.id}`;
+ await admin(event,'/results/publish','POST',{});
+ const published=await(await publicGet(boardPath)).json();assert.equal(published.mode,'demo');assert.equal(published.rows.length,5);assert.ok(published.rows.every(row=>row.rank===1));
+ assert.equal(new Set(published.rows.map(row=>row.imageUrl)).size,5);
+ for(const row of published.rows){const output=outputs.find(o=>row.imageUrl.endsWith('/'+o.id+'/image'));assert.ok(output);const image=await publicGet(row.imageUrl);assert.equal(image.headers.get('content-type'),'image/png');assert.equal(image.headers.get('cache-control'),'no-store');assert.equal(image.headers.get('x-content-type-options'),'nosniff');assert.equal(Buffer.from(await image.arrayBuffer()).toString('base64'),output.generated_data);}
+ assert.ok(!JSON.stringify(published).includes(outputs[0].generated_data));
+ await sql`update promptchamp.events set status='completed',results_visibility='released' where id=${copies.event.id}`;
+ await publicGet(`/api/events/${copies.event.slug}/leaderboard/${outputs[0].id}/image`,404);
+ await publicGet(`${boardPath}/${randomUUID()}/image`,404);
+ await sql`update promptchamp.submissions set status='voided' where id=${outputs[0].id}`;
+ await publicGet(`${boardPath}/${outputs[0].id}/image`,404);
+ await sql`update promptchamp.round_entries set is_current=false where id=${outputs[1].entry_id}`;
+ await publicGet(`${boardPath}/${outputs[1].id}/image`,404);
+ await sql`update promptchamp.submissions set generated_data=null,generated_mime=null where id=${outputs[2].id}`;
+ const missing=await(await publicGet(boardPath)).json();assert.equal(missing.rows.length,3);assert.equal(missing.rows.filter(row=>row.imageUrl===null).length,1);
+ await publicGet(`${boardPath}/${outputs[2].id}/image`,404);
+ await sql`update promptchamp.events set status='archived' where id=${event.id}`;
+ await publicGet(boardPath,404);await publicGet(`${boardPath}/${outputs[3].id}/image`,404);
+ const [gallery]=await sql`insert into promptchamp.workspaces(name) values('Published gallery isolation fixture') returning id`;galleryWorkspace=gallery.id;
+ await sql`update promptchamp.events set status='completed',workspace_id=${galleryWorkspace} where id=${event.id}`;
+ await publicGet(boardPath);await publicGet(`${boardPath}/${outputs[3].id}/image`);
+ await sql`update promptchamp.workspaces set status='suspended' where id=${galleryWorkspace}`;
+ await publicGet(boardPath,404);await publicGet(`${boardPath}/${outputs[3].id}/image`,404);
+ await sql`update promptchamp.workspaces set status='active' where id=${galleryWorkspace}`;
+ await sql`update promptchamp.events set results_visibility='held' where id=${event.id}`;
+ assert.deepEqual((await(await publicGet(boardPath)).json()).rows,[]);await publicGet(`${boardPath}/${outputs[3].id}/image`,404);
  const live=await create('live',1);await upload(live,0);await upload(live,1);await admin(live,'','PATCH',{status:'registration'});const [client]=await join(live,1);
  await sql`insert into promptchamp.worker_heartbeats(id) values(${worker})`;
  await admin(live,'/queue/lock','POST',{});await admin(live,'/queue/next','POST',{});await team(client,live,'start','POST',{});
@@ -63,8 +97,9 @@ try{
  await admin(live,'/results/retry-scoring','POST',{submissionId:submission.id});await processNext(providers,submission.id);assert.equal(generations,1);
  await admin(live,'/results/retry-generation','POST',{submissionId:submission.id,reason:'Isolated test replacement generation'});await processNext(providers,submission.id);await processNext(providers,submission.id);
  assert.equal(generations,2);assert.equal(judgments,3);assert.equal((await sql`select reference_image_id from promptchamp.round_entries where event_id=${live.id}`)[0].reference_image_id,pinned.reference_image_id);
- console.log(`PASS: ${checks} random-reference checks; five unique assignments, insufficient-pool rollback, idempotent lock, private reveal, recovery-safe starts, demo references, protected presentation, cloning, and pinned judging across both retry types.`);
+ console.log(`PASS: ${checks} random-reference/gallery checks; unique assignments, recovery, pinned judging, protected presentation, and published per-team images with event/workspace/privacy gates.`);
 }finally{
  for(const id of events){await sql.begin(async tx=>{await tx`delete from promptchamp.evaluations where submission_id in(select id from promptchamp.submissions where event_id=${id})`;await tx`delete from promptchamp.generation_reservations where event_id=${id}`;await tx`delete from promptchamp.processing_jobs where submission_id in(select id from promptchamp.submissions where event_id=${id})`;await tx`delete from promptchamp.submissions where event_id=${id}`;await tx`delete from promptchamp.round_entries where event_id=${id}`;await tx`delete from promptchamp.team_sessions where team_id in(select id from promptchamp.teams where event_id=${id})`;await tx`delete from promptchamp.teams where event_id=${id}`;await tx`delete from promptchamp.audit_events where event_id=${id}`;await tx`delete from promptchamp.reference_images where event_id=${id}`;await tx`delete from promptchamp.rounds where event_id=${id}`;await tx`delete from promptchamp.events where id=${id}`;});}
+ if(galleryWorkspace)await sql`delete from promptchamp.workspaces where id=${galleryWorkspace}`;
  await sql`delete from promptchamp.worker_heartbeats where id=${worker}`;await sql.end({timeout:2});
 }

@@ -93,15 +93,31 @@ export default async function teamApi(request: Request) {
   try {
     const sql = eventDb();
     if(url.pathname==='/api/events'&&request.method==='GET')return json({events:await sql`select e.title,e.slug,e.status,e.scheduled_at,e.mode from promptchamp.events e join promptchamp.workspaces w on w.id=e.workspace_id where e.status in ('registration','live','completed') and e.discoverable and w.status='active' order by e.scheduled_at desc limit 50`});
+    const leaderboardImage=url.pathname.match(/^\/api\/events\/([a-z0-9-]{3,100})\/leaderboard\/([a-f0-9-]{36})\/image$/i);
+    if(leaderboardImage&&request.method==='GET'){
+      if(!uuid.test(leaderboardImage[2]))return json({error:'Image not found.'},404);
+      // The URL never grants early access. Recheck publication and tenant state
+      // on every image request, including links copied before the reveal.
+      const [image]=await sql`select s.generated_data,s.generated_mime from promptchamp.submissions s
+        join promptchamp.events e on e.id=s.event_id join promptchamp.workspaces w on w.id=e.workspace_id
+        join promptchamp.round_entries n on n.id=s.entry_id and n.event_id=e.id
+        join promptchamp.teams t on t.id=n.team_id and t.event_id=e.id
+        where e.slug=${leaderboardImage[1]} and s.id=${leaderboardImage[2]} and e.results_visibility='released'
+        and e.status in ('registration','live','completed') and w.status='active'
+        and s.status='scored' and n.is_current and t.status='active'`;
+      if(!image?.generated_data||!['image/png','image/jpeg','image/webp'].includes(image.generated_mime))return json({error:'Image not found.'},404);
+      return new Response(Buffer.from(image.generated_data,'base64'),{headers:{'Content-Type':image.generated_mime,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+    }
     const leaderboardPath=url.pathname.match(/^\/api\/events\/([a-z0-9-]{3,100})\/leaderboard$/);
     if(leaderboardPath && request.method==='GET') {
       const [event]=await sql`select e.id,e.title,e.results_visibility,e.mode from promptchamp.events e join promptchamp.workspaces w on w.id=e.workspace_id where e.slug=${leaderboardPath[1]} and e.status in ('registration','live','completed') and w.status='active'`;
       if(!event) return json({error:'Event not found.'},404);
       if(event.results_visibility!=='released') return json({title:event.title,mode:event.mode,released:false,rows:[]});
-      const rows=await sql`select rank() over(order by s.score desc)::int as rank,t.name,s.score
+      const rows=await sql`select rank() over(order by s.score desc)::int as rank,t.name,s.score,s.id,
+        (s.generated_data is not null and s.generated_mime in ('image/png','image/jpeg','image/webp')) as has_image
         from promptchamp.submissions s join promptchamp.round_entries n on n.id=s.entry_id join promptchamp.teams t on t.id=n.team_id
         where s.event_id=${event.id} and s.status='scored' and n.is_current and t.status='active' order by rank,t.name`;
-      return json({title:event.title,mode:event.mode,released:true,rows});
+      return json({title:event.title,mode:event.mode,released:true,rows:rows.map(({id,has_image,...row})=>({...row,imageUrl:has_image?`/api/events/${leaderboardPath[1]}/leaderboard/${id}/image`:null}))});
     }
     const publicPath = url.pathname.match(/^\/api\/events\/([a-z0-9-]{3,100})$/);
     if (publicPath && request.method === 'GET') {

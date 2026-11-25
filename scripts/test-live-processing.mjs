@@ -39,7 +39,15 @@ try{
   assert.equal(await processNext(undefined,submission.id),true);
   assert.equal(await processNext(undefined,submission.id),true);
  }else{
-  const claims=await Promise.all([processNext(providers,submission.id),processNext(providers,submission.id)]);assert.deepEqual(claims.sort(),[false,true]);assert.equal(calls,1);
+  // Hold generation open while the second worker attempts the same job. An
+  // instant mock can otherwise finish and enqueue judging before that claim.
+  const started=Promise.withResolvers(),release=Promise.withResolvers();
+  const first=processNext({...providers,generate:async()=>{started.resolve();await release.promise;return providers.generate();}},submission.id);
+  try{
+    await Promise.race([started.promise,first.then(()=>{throw new Error('Generation was not started');})]);
+    assert.equal(await processNext(providers,submission.id),false);
+  }finally{release.resolve();await first;}
+  assert.equal(await first,true);assert.equal(calls,1);
   await processNext({...providers,judge:async()=>{throw new Error('Simulated judge timeout');}},submission.id);
   let [row]=await sql`select status from promptchamp.submissions where id=${submission.id}`;assert.equal(row.status,'judge_failed');
   await call(host,hostPath('/results/retry-scoring'),'POST',{submissionId:submission.id});

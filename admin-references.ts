@@ -1,7 +1,7 @@
 const esc=(s:unknown)=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));
 export function attachReferences(parent:HTMLElement,event:{id:string;status:string;reference_mode:string},reload:()=>Promise<void>){
  if(event.reference_mode!=='random_unique')return;
- const panel=document.createElement('section');panel.className='form reference-pool';parent.append(panel);
+ const panel=document.createElement('section');panel.className='form reference-pool';parent.insertBefore(panel,parent.querySelector('#ready'));
  const endpoint=`/api/admin/events/${event.id}/references`;
  let images:any[]=[],editable=false,busy=false,notice='';
  async function api(path='',method='GET',body?:unknown){const response=await fetch(endpoint+path,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});const data=await response.json();if(!response.ok)throw new Error(data.error);return data;}

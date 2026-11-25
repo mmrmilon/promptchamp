@@ -28,9 +28,19 @@ try {
   await request('session');
   const slug = 'setup-test-' + crypto.randomUUID();
   const settings = {title:'Automated setup rehearsal',slug,scheduledAt:'2026-12-01T10:00:00+08:00',durationSeconds:120,generationCap:80};
-  await request('events','POST',{...settings,durationSeconds:30},400);
+  // Invalid settings identify the offending control, including fields inside
+  // the collapsed advanced section. Rejections must not create partial drafts.
+  const before=(await(await request('events')).json()).events.length;
+  for(const [field,value] of [['title','  IT  '],['slug','office event'],['scheduledAt','invalid'],['durationSeconds',30],['generationCap',0],['generationCap',10001],['teamCapacity',101]]){
+    const rejected=await(await request('events','POST',{...settings,[field]:value},400)).json();
+    assert.deepEqual(Object.keys(rejected.fields),[field]);
+    assert.equal(rejected.error,rejected.fields[field]);
+  }
+  assert.equal((await(await request('events')).json()).events.length,before);
   const created = await (await request('events','POST',settings,201)).json();
   eventId = created.event.id;
+  const rejectedEdit=await(await request(`events/${eventId}`,'PATCH',{...settings,generationCap:0},400)).json();
+  assert.ok(rejectedEdit.fields.generationCap);
   await request('events','POST',settings,409);
   await request(`events/${eventId}`,'PATCH',{status:'registration'},409);
   await request(`events/${eventId}`,'PATCH',{...settings,durationSeconds:180});

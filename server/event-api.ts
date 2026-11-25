@@ -6,6 +6,7 @@ import { aiConfigured,workerReady } from './processing';
 import {AccountError,accountContext,legacyAllowed,OFFICE_WORKSPACE,signOutAccount} from './account-session';
 import {referencePoolApi} from './reference-pool-api';
 import {presentationApi} from './presentation-api';
+import {eventSettingsErrors} from './event-validation';
 
 const json = (value: unknown, status = 200, headers = {}) => Response.json(value, {
   status, headers: { 'Cache-Control': 'no-store', ...headers },
@@ -104,12 +105,8 @@ export default async function eventApi(request: Request) {
       if(!['shared','random_unique'].includes(referenceMode))return json({error:'Choose an image assignment mode.'},400);
       if(!['demo','live'].includes(mode))return json({error:'Choose demo or live mode.'},400);
       if(mode==='live'&&!workspace.live_enabled)return json({error:'Live access needs platform approval.'},403);
-      if (title.length < 3 || title.length > 100 || !/^[a-z0-9-]{3,100}$/.test(slug) ||
-          !Number.isFinite(time) || ![120,180].includes(body.durationSeconds) ||
-          !Number.isInteger(body.generationCap) || body.generationCap < 1 || body.generationCap > 10000 ||
-          !Number.isInteger(body.teamCapacity ?? 20) || (body.teamCapacity ?? 20) < 1 || (body.teamCapacity ?? 20) > 100) {
-        return json({ error: 'Check the title, event address, date, duration, and budget.' }, 400);
-      }
+      const fields=eventSettingsErrors(body,true);
+      if(Object.keys(fields).length)return json({error:Object.values(fields).join(' '),fields},400);
       const [event] = await sql.begin(async tx => {
         const [event] = await tx`insert into promptchamp.events(title,slug,scheduled_at,generation_cap,team_capacity,workspace_id,mode,reference_mode)
           values(${title},${slug},${new Date(time).toISOString()},${body.generationCap},${body.teamCapacity ?? 20},${workspace.id},${mode},${referenceMode}) returning *`;
@@ -152,10 +149,8 @@ export default async function eventApi(request: Request) {
         if(mode==='live'&&!workspace.live_enabled)return json({error:'Live access needs platform approval.'},403);
         const title = typeof body.title === 'string' ? body.title.trim() : '';
         const time = Date.parse(body.scheduledAt);
-        if (title.length < 3 || title.length > 100 || !Number.isFinite(time) ||
-            ![120,180].includes(body.durationSeconds) || !Number.isInteger(body.generationCap) ||
-            body.generationCap < 1 || body.generationCap > 10000 || !Number.isInteger(body.teamCapacity ?? 20) ||
-            (body.teamCapacity ?? 20) < 1 || (body.teamCapacity ?? 20) > 100) return json({ error: 'Check the event settings.' }, 400);
+        const fields=eventSettingsErrors(body);
+        if(Object.keys(fields).length)return json({error:Object.values(fields).join(' '),fields},400);
         const changed = await sql.begin(async tx => {
           const [event] = await tx`select status from promptchamp.events where id=${id} for update`;
           if (!event || event.status !== 'draft') return false;
